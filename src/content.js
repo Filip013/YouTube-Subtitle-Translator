@@ -1,7 +1,7 @@
 /**
- * Content Script Orchestrator for YouTube Subtitle Translator
- * PURE TRANSCRIPTION MODE (Stage 1: gemini-3.5-transcribe-live)
- * Direct real-time speech-to-text with immediate disk persistence in chrome.storage.local
+ * Content Script Orchestrator for YouTube Subtitle Translator (Two-Stage Pipeline)
+ * Stage 1: gemini-3.5-transcribe-live (Live WebSocket ASR)
+ * Stage 2: gemini-3.1-flash-lite (Fast Text-to-Text Serbian Translation)
  */
 
 (function () {
@@ -11,6 +11,7 @@
   let vadProcessor = null;
   let audioCapture = null;
   let transcribeClient = null;
+  let textTranslator = null;
   let storageManager = null;
   let subtitleRenderer = null;
   let isInitialized = false;
@@ -18,12 +19,13 @@
   // Real-time telemetry state
   const diagnostics = {
     videoId: null,
-    mode: 'Pure Transcription (gemini-3.5-transcribe-live)',
+    mode: 'Two-Stage: Transcribe Live + Flash Lite',
     status: 'Initializing...',
     audioLevel: 0,
     framesSent: 0,
     cuesSaved: 0,
     lastTranscribed: '',
+    lastTranslated: '',
     wsInfo: null,
     lastError: null,
     lastUpdated: Date.now()
@@ -34,6 +36,10 @@
     enabled: true,
     apiKey: '',
     transcribeModel: 'gemini-3.5-transcribe-live',
+    translateModel: 'gemini-3.1-flash-lite',
+    scriptType: 'latin', // 'latin' or 'cyrillic'
+    speakerGender: 'auto', // 'auto', 'male', 'female'
+    showDualSubtitles: false,
     sensitivity: 'medium',
     fontSize: 22,
     fontColor: '#ffffff',
@@ -96,11 +102,19 @@
       fontColor: config.fontColor,
       backgroundColor: config.backgroundColor,
       bottomOffset: config.bottomOffset,
-      showDualSubtitles: false
+      showDualSubtitles: config.showDualSubtitles
     });
     subtitleRenderer.setEnabled(config.enabled);
 
-    // 3. Initialize Live Transcribe Client (WebSocket Speech-to-Text)
+    // 3. Initialize Stage 2 Text Translator
+    textTranslator = new GeminiTextTranslator({
+      apiKey: config.apiKey,
+      model: config.translateModel,
+      scriptType: config.scriptType,
+      speakerGender: config.speakerGender
+    });
+
+    // 4. Initialize Stage 1 Live Transcribe Client (WebSocket Speech-to-Text)
     transcribeClient = new GeminiTranscribeClient({
       apiKey: config.apiKey,
       model: config.transcribeModel,
@@ -118,13 +132,13 @@
       }
     });
 
-    // 4. Initialize VAD Processor
+    // 5. Initialize VAD Processor
     vadProcessor = new VADProcessor({
       sampleRate: 16000,
       sensitivity: config.sensitivity
     });
 
-    // 5. Initialize Audio Capture Engine
+    // 6. Initialize Audio Capture Engine
     audioCapture = new AudioCaptureEngine({
       vadProcessor: vadProcessor,
       onPCMFrame: (pcmFrame) => {
@@ -142,19 +156,30 @@
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Pure Transcription Mode initialized with model:', config.transcribeModel);
+    console.log('[GeminiSubtitles] Two-Stage Pipeline Initialized: Transcribe (' + config.transcribeModel + ') + Translate (' + config.translateModel + ')');
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync' || area === 'local') {
+        let scriptChanged = false;
         for (const [key, { newValue }] of Object.entries(changes)) {
           config[key] = newValue;
+          if (key === 'scriptType') scriptChanged = true;
         }
 
         if (transcribeClient) {
           transcribeClient.updateConfig({
             apiKey: config.apiKey,
             model: config.transcribeModel
+          });
+        }
+
+        if (textTranslator) {
+          textTranslator.updateConfig({
+            apiKey: config.apiKey,
+            model: config.translateModel,
+            scriptType: config.scriptType,
+            speakerGender: config.speakerGender
           });
         }
 
@@ -171,8 +196,12 @@
             fontColor: config.fontColor,
             backgroundColor: config.backgroundColor,
             bottomOffset: config.bottomOffset,
-            showDualSubtitles: false
+            showDualSubtitles: config.showDualSubtitles
           });
+        }
+
+        if (scriptChanged && currentVideoId && storageManager) {
+          loadStoredSubtitles(currentVideoId);
         }
       }
     });
@@ -184,7 +213,7 @@
           storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
             if (subtitleRenderer) subtitleRenderer.clear();
             if (transcribeClient) transcribeClient.resetStream();
-            publishDiagnostics({ cuesSaved: 0, lastTranscribed: '' });
+            publishDiagnostics({ cuesSaved: 0, lastTranscribed: '', lastTranslated: '' });
             sendResponse({ success: true });
           });
           return true;
@@ -197,15 +226,15 @@
   }
 
   /**
-   * Loads previously remembered transcription fragments for this video
+   * Loads previously remembered subtitles for this video
    */
   async function loadStoredSubtitles(videoId) {
     if (!storageManager || !subtitleRenderer || !videoId) return;
 
     try {
-      const storedCues = await storageManager.loadSubtitles(videoId);
+      const storedCues = await storageManager.loadSubtitles(videoId, config.scriptType);
       if (storedCues && storedCues.length > 0) {
-        console.log(`[GeminiSubtitles] Loaded ${storedCues.length} remembered transcription fragments for video: ${videoId}`);
+        console.log(`[GeminiSubtitles] Loaded ${storedCues.length} remembered subtitles for video: ${videoId}`);
         storedCues.forEach(cue => subtitleRenderer.addCue(cue));
         publishDiagnostics({
           status: `Loaded ${storedCues.length} saved fragments from disk`,
@@ -235,14 +264,25 @@
     const title = getVideoTitle();
 
     if (!chunkData.isFinal) {
-      // 1. Live transcription preview on player overlay
+      // 1. Live interim transcription preview on player overlay
       subtitleRenderer.setLiveCue(transcriptText, chunkData.startMs, chunkData.endMs);
       publishDiagnostics({ lastTranscribed: transcriptText });
     } else {
-      // 2. Finalized sentence: Save directly to disk (chrome.storage.local) and add as permanent cue
+      // 2. Finalized sentence from Stage 1: Send to Stage 2 Text Translator
+      const englishText = transcriptText;
+
+      publishDiagnostics({
+        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        lastTranscribed: englishText
+      });
+
+      // Translate clean transcript into natural Serbian via Flash Lite (~60ms)
+      const serbianText = await textTranslator.translateText(englishText);
+      const displayText = serbianText || englishText;
+
       const cue = {
-        text: transcriptText,
-        originalText: transcriptText,
+        text: displayText,
+        originalText: englishText,
         startMs: chunkData.startMs,
         endMs: chunkData.endMs
       };
@@ -250,13 +290,14 @@
       subtitleRenderer.addCue(cue);
 
       if (storageManager) {
-        await storageManager.saveCue(currentVideoId, 'latin', cue, title);
+        await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
         publishDiagnostics({
-          status: 'Saved transcription fragment to disk!',
-          lastTranscribed: transcriptText,
+          status: 'Fragment translated & saved!',
+          lastTranscribed: englishText,
+          lastTranslated: displayText,
           cuesSaved: subtitleRenderer.getCues().length
         });
-        console.log(`[GeminiSubtitles] 💾 Persisted fragment [${cue.startMs}ms - ${cue.endMs}ms]: "${transcriptText}"`);
+        console.log(`[GeminiSubtitles] 💾 Persisted subtitle: "${englishText}" -> "${displayText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
       }
     }
   }
