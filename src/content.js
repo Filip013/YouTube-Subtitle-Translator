@@ -255,7 +255,8 @@
         endMs: chunkData.endMs
       };
 
-      subtitleRenderer.addCue(cue);
+      const videoTimeMs = audioCapture?.videoElement ? Math.round(audioCapture.videoElement.currentTime * 1000) : 0;
+      subtitleRenderer.addCue(cue, videoTimeMs);
 
       if (storageManager) {
         await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
@@ -264,7 +265,7 @@
           lastTranslated: subtitleText,
           cuesSaved: subtitleRenderer.getCues().length
         });
-        console.log(`[GeminiSubtitles] 💾 Classical Subtitle: "${subtitleText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
+        console.log(`[GeminiSubtitles] 💾 Classical Subtitle: "${subtitleText}" [${cue.startMs}ms - ${cue.endMs}ms] (Playback: ${videoTimeMs}ms)`);
       }
     }
   }

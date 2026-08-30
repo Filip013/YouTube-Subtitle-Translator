@@ -2,11 +2,11 @@
  * Subtitle Renderer for YouTube Subtitle Translator
  * Classical Closed Caption Engine (Netflix / Movie Style)
  * 
- * Key Principles:
- * 1. Classical Captions: Text does NOT grow or stutter word-by-word. Subtitles appear only as complete,
- *    ready-to-read sentences at the exact video timestamp.
- * 2. Stable Display Window: Each sentence holds stably on screen for its full duration (>= 2.5s).
- * 3. Smooth Transitions: Fluid opacity crossfades between sentences.
+ * Features:
+ * 1. Forward Reading Window: Ensures live-translated sentences stay comfortably visible
+ *    for >= 3.0 seconds after the sentence finishes speaking in real time.
+ * 2. Pre-Buffered Replay Support: Perfectly synchronized to speech timestamps on seek/replay.
+ * 3. Classical Captions: Zero typewriter jitter; full, ready-to-read sentences only.
  * 4. Dual Subtitle Support: Optional original English + Serbian translation.
  */
 
@@ -30,7 +30,7 @@ class SubtitleRenderer {
     this.styleSettings = {
       fontSize: options.fontSize || 22,
       fontColor: options.fontColor || '#ffffff',
-      backgroundColor: options.backgroundColor || 'rgba(8, 8, 8, 0.85)',
+      backgroundColor: options.backgroundColor || 'rgba(6, 6, 8, 0.88)',
       bottomOffset: options.bottomOffset || 12,
       textShadow: options.textShadow || '0px 2px 4px rgba(0, 0, 0, 0.95)'
     };
@@ -107,29 +107,33 @@ class SubtitleRenderer {
   }
 
   /**
-   * Adds a completed, classical sentence cue
+   * Adds a completed, classical sentence cue with forward reading window
    * @param {Object} cue - { text: string, originalText?: string, startMs: number, endMs: number }
+   * @param {number} [currentPlaybackMs] - Current video playback position in ms
    */
-  addCue(cue) {
+  addCue(cue, currentPlaybackMs = 0) {
     if (!cue || !cue.text) return;
 
     const cleanText = cue.text.trim();
     if (!cleanText) return;
 
-    // Minimum display duration (at least 2.5s or ~380ms per word) for comfortable reading
+    // Minimum reading time (>= 2.8s or ~380ms per word)
     const wordCount = cleanText.split(/\s+/).length;
-    const minDuration = Math.max(2500, wordCount * 380);
-    const endMs = Math.max(cue.endMs, cue.startMs + minDuration);
+    const readingDurationMs = Math.max(2800, wordCount * 380);
+
+    const baseEnd = Math.max(cue.endMs, cue.startMs + readingDurationMs);
+    // If watching live, extend endMs forward from current playback time so user has time to read
+    const liveEnd = currentPlaybackMs > 0 ? Math.max(baseEnd, currentPlaybackMs + readingDurationMs) : baseEnd;
 
     const newCue = {
-      id: `${cue.startMs}_${endMs}`,
+      id: `${cue.startMs}_${liveEnd}`,
       text: cleanText,
       originalText: (cue.originalText || '').trim(),
       startMs: cue.startMs,
-      endMs: endMs
+      endMs: liveEnd
     };
 
-    // Remove overlapping previous version of the same sentence
+    // Remove overlapping/duplicate cues
     this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 800);
     this.cues.push(newCue);
     this.cues.sort((a, b) => a.startMs - b.startMs);
@@ -154,7 +158,7 @@ class SubtitleRenderer {
     if (!this.statusElement) return;
     if (status === 'translating') {
       this.statusElement.classList.add('translating');
-      this.statusElement.textContent = '✨ Translating in background...';
+      this.statusElement.textContent = '✨ Translating...';
     } else if (status === 'error') {
       this.statusElement.classList.remove('translating');
       this.statusElement.classList.add('error');
@@ -186,7 +190,7 @@ class SubtitleRenderer {
     if (!this.textElement) return;
 
     const activeCue = this.cues.find(
-      c => currentTimeMs >= c.startMs - 150 && currentTimeMs <= c.endMs + 300
+      c => currentTimeMs >= c.startMs - 200 && currentTimeMs <= c.endMs + 300
     );
 
     if (activeCue) {
@@ -199,7 +203,6 @@ class SubtitleRenderer {
 
   _showText(primaryText, secondaryText, cueId) {
     if (this.currentCueId === cueId) {
-      // Already displaying this complete sentence steadily
       return;
     }
 
