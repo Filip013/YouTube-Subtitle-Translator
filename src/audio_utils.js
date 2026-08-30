@@ -34,6 +34,25 @@ class AudioUtils {
   }
 
   /**
+   * Converts Float32Array [-1.0, 1.0] samples directly to a raw 16-bit PCM Base64 string
+   * (for the Gemini Multimodal Live API: audio/pcm;rate=16000).
+   * @param {Float32Array} samples 
+   * @returns {string} Base64 encoded raw 16-bit PCM data
+   */
+  static floatTo16BitPCMBase64(samples) {
+    const buffer = new ArrayBuffer(samples.length * 2);
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      const val = s < 0 ? s * 0x8000 : s * 0x7fff;
+      view.setInt16(i * 2, val, true); // Little-endian 16-bit integer
+    }
+
+    return this.arrayBufferToBase64(buffer);
+  }
+
+  /**
    * Converts Float32Array [-1.0, 1.0] samples to a 16-bit PCM Mono WAV ArrayBuffer.
    * @param {Float32Array} samples - Normalized audio samples
    * @param {number} sampleRate - Sample rate (e.g. 16000)
@@ -78,9 +97,7 @@ class AudioUtils {
     // Write 16-bit PCM samples
     let offset = 44;
     for (let i = 0; i < samples.length; i++, offset += 2) {
-      // Clamp between -1.0 and 1.0
       const s = Math.max(-1, Math.min(1, samples[i]));
-      // Convert to 16-bit signed integer (-32768 to 32767)
       const val = s < 0 ? s * 0x8000 : s * 0x7fff;
       view.setInt16(offset, val, true);
     }
@@ -106,7 +123,7 @@ class AudioUtils {
     let binary = '';
     const bytes = new Uint8Array(buffer);
     const len = bytes.byteLength;
-    const chunkSize = 0x8000; // Process in chunks to prevent call stack overflow
+    const chunkSize = 0x8000;
 
     for (let i = 0; i < len; i += chunkSize) {
       const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));

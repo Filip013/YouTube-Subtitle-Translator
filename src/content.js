@@ -1,6 +1,6 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator
- * Injected on YouTube pages, bridges Audio Capture, VAD, Gemini Service, Storage Manager, and Subtitle Renderer.
+ * Bridges Audio Capture, Gemini Live Client (WebSocket), Storage Manager, and Subtitle Renderer.
  */
 
 (function () {
@@ -9,7 +9,7 @@
   let currentVideoId = null;
   let vadProcessor = null;
   let audioCapture = null;
-  let geminiService = null;
+  let geminiLiveClient = null;
   let storageManager = null;
   let subtitleRenderer = null;
   let isInitialized = false;
@@ -18,11 +18,9 @@
   const config = {
     enabled: true,
     apiKey: '',
-    model: 'gemini-3.5-flash-lite',
+    model: 'gemini-3.1-flash-live',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     sensitivity: 'medium',
-    concurrency: 3,
-    enableContextChaining: true,
     fontSize: 22,
     fontColor: '#ffffff',
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
@@ -50,22 +48,7 @@
     // 1. Initialize Storage Manager
     storageManager = new StorageManager();
 
-    // 2. Initialize Gemini Service
-    geminiService = new GeminiService({
-      apiKey: config.apiKey,
-      model: config.model,
-      scriptType: config.scriptType,
-      concurrency: config.concurrency,
-      enableContextChaining: config.enableContextChaining
-    });
-
-    // 3. Initialize VAD Processor
-    vadProcessor = new VADProcessor({
-      sampleRate: 16000,
-      sensitivity: config.sensitivity
-    });
-
-    // 4. Initialize Subtitle Renderer
+    // 2. Initialize Subtitle Renderer
     subtitleRenderer = new SubtitleRenderer({
       fontSize: config.fontSize,
       fontColor: config.fontColor,
@@ -74,14 +57,42 @@
     });
     subtitleRenderer.setEnabled(config.enabled);
 
+    // 3. Initialize Gemini Live Client (WebSocket streaming)
+    geminiLiveClient = new GeminiLiveClient({
+      apiKey: config.apiKey,
+      model: config.model,
+      scriptType: config.scriptType,
+      onSubtitleChunk: handleLiveSubtitleChunk,
+      onStatusChange: (status, msg) => {
+        if (status === 'connecting') {
+          subtitleRenderer.setStatus('translating');
+        } else if (status === 'error') {
+          subtitleRenderer.setStatus('error');
+          setTimeout(() => subtitleRenderer.setStatus('idle'), 3000);
+        } else if (status === 'connected') {
+          subtitleRenderer.setStatus('idle');
+        }
+      }
+    });
+
+    // 4. Initialize VAD Processor
+    vadProcessor = new VADProcessor({
+      sampleRate: 16000,
+      sensitivity: config.sensitivity
+    });
+
     // 5. Initialize Audio Capture Engine
     audioCapture = new AudioCaptureEngine({
       vadProcessor: vadProcessor,
-      onSpeechChunk: handleSpeechChunk
+      onPCMFrame: (pcmFrame) => {
+        if (config.enabled && config.apiKey && geminiLiveClient) {
+          geminiLiveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
+        }
+      }
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Extension initialized with model:', config.model);
+    console.log('[GeminiSubtitles] Extension initialized with Live model:', config.model);
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -92,13 +103,11 @@
           if (key === 'scriptType') scriptChanged = true;
         }
 
-        if (geminiService) {
-          geminiService.updateConfig({
+        if (geminiLiveClient) {
+          geminiLiveClient.updateConfig({
             apiKey: config.apiKey,
             model: config.model,
-            scriptType: config.scriptType,
-            concurrency: config.concurrency,
-            enableContextChaining: config.enableContextChaining
+            scriptType: config.scriptType
           });
         }
 
@@ -118,7 +127,6 @@
           });
         }
 
-        // If script was changed, reload stored subtitles for this video in the new script
         if (scriptChanged && currentVideoId && storageManager) {
           loadStoredSubtitles(currentVideoId);
         }
@@ -147,44 +155,28 @@
   }
 
   /**
-   * Handles extracted speech chunks from VAD & Audio Engine via lookahead queue
+   * Handles streaming subtitle chunks received from Gemini Live API
    */
-  async function handleSpeechChunk(chunk) {
-    if (!config.enabled || !config.apiKey || !currentVideoId) return;
+  function handleLiveSubtitleChunk(subtitleData) {
+    if (!config.enabled || !currentVideoId) return;
 
-    subtitleRenderer.setStatus('translating');
+    const cue = {
+      text: subtitleData.text,
+      startMs: subtitleData.startMs,
+      endMs: subtitleData.endMs
+    };
 
-    try {
-      const result = await geminiService.enqueueTranslation(chunk, currentVideoId);
-      subtitleRenderer.setStatus('idle');
+    // Render subtitle immediately on screen
+    subtitleRenderer.addCue(cue);
 
-      if (result.text) {
-        const cue = {
-          text: result.text,
-          startMs: result.startMs,
-          endMs: result.endMs
-        };
-
-        // Add to UI overlay
-        subtitleRenderer.addCue(cue);
-
-        // Save persistently so it's remembered for future views
-        if (storageManager && !result.cached) {
-          storageManager.saveCue(currentVideoId, config.scriptType, cue);
-        }
-      } else if (result.error && result.error !== 'NO_API_KEY') {
-        subtitleRenderer.setStatus('error');
-        setTimeout(() => subtitleRenderer.setStatus('idle'), 3000);
-      }
-    } catch (err) {
-      console.error('[GeminiSubtitles] Translation error:', err);
-      subtitleRenderer.setStatus('error');
-      setTimeout(() => subtitleRenderer.setStatus('idle'), 3000);
+    // Save final completed sentences into persistent memory
+    if (subtitleData.isFinal && storageManager) {
+      storageManager.saveCue(currentVideoId, config.scriptType, cue);
     }
   }
 
   /**
-   * Helper to extract Video ID from URL
+   * Extract Video ID from URL
    */
   function getVideoId() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -198,6 +190,7 @@
     const videoId = getVideoId();
     if (!videoId) {
       if (audioCapture) audioCapture.detach();
+      if (geminiLiveClient) geminiLiveClient.disconnect();
       if (subtitleRenderer) subtitleRenderer.clear();
       currentVideoId = null;
       return;
@@ -211,16 +204,17 @@
         currentVideoId = videoId;
         if (subtitleRenderer) subtitleRenderer.clear();
         if (vadProcessor) vadProcessor.reset();
-        if (geminiService) geminiService.resetQueue();
+        if (geminiLiveClient) {
+          geminiLiveClient.resetStream();
+          geminiLiveClient.connect();
+        }
 
-        // Load previously remembered subtitles for this video
         await loadStoredSubtitles(videoId);
       }
 
       subtitleRenderer.init(playerContainer, videoElement);
       audioCapture.attach(videoElement);
     } else {
-      // Retry in 500ms if player is still loading
       setTimeout(checkAndAttachPlayer, 500);
     }
   }
@@ -234,7 +228,6 @@
     setTimeout(checkAndAttachPlayer, 300);
   });
 
-  // Observe DOM changes to catch player dynamic mounts
   const observer = new MutationObserver(() => {
     const video = document.querySelector('video.html5-main-video');
     if (video && (!audioCapture || audioCapture.videoElement !== video)) {
@@ -244,7 +237,6 @@
 
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Start initialization
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

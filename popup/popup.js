@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    model: 'gemini-3.5-flash-lite',
+    model: 'gemini-3.1-flash-live',
     scriptType: 'latin',
     sensitivity: 'medium'
   };
@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTestConnection.textContent = '⏳ Testing...';
     hideFeedback();
 
-    chrome.storage.sync.get({ model: 'gemini-3.5-flash-lite' }, async (items) => {
+    chrome.storage.sync.get({ model: 'gemini-3.1-flash-live' }, async (items) => {
       const result = await GeminiService.testConnection(key, items.model);
       btnTestConnection.disabled = false;
       btnTestConnection.textContent = '⚡ Test Connection';

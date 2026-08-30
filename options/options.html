@@ -14,13 +14,12 @@
         <div class="logo-icon">✨</div>
         <div>
           <h2>Gemini Subtitles</h2>
-          <span class="badge">v1.1.0</span>
+          <span class="badge">v1.2.0 Live</span>
         </div>
       </div>
       <nav class="sidebar-nav">
-        <a href="#section-api" class="nav-item active">API & Model</a>
+        <a href="#section-api" class="nav-item active">API & Live Model</a>
         <a href="#section-language" class="nav-item">Language & Script</a>
-        <a href="#section-pipeline" class="nav-item">Pipeline & Lookahead</a>
         <a href="#section-vad" class="nav-item">Voice Detection (VAD)</a>
         <a href="#section-appearance" class="nav-item">Appearance & Style</a>
         <a href="#section-cache" class="nav-item">Video Memory & Cache</a>
@@ -35,14 +34,14 @@
     <main class="content-area">
       <header class="content-header">
         <h1>Extension Settings</h1>
-        <p class="subtitle">Customize real-time audio translation, Gemini 3.5 Flash Lite settings, persistent memory, and subtitle styling.</p>
+        <p class="subtitle">Customize real-time audio translation, Gemini 3.1 Flash Live settings, persistent memory, and subtitle styling.</p>
       </header>
 
       <!-- Section: API & Model -->
       <section id="section-api" class="card-section">
         <div class="card-header">
-          <h3>🤖 AI Model & Authentication</h3>
-          <p>Configure your Google Gemini API credentials and model parameters.</p>
+          <h3>🤖 AI Model & Live WebSocket API</h3>
+          <p>Configure your Google Gemini API credentials and Live streaming model.</p>
         </div>
         <div class="card-body">
           <div class="form-row">
@@ -57,15 +56,16 @@
           </div>
 
           <div class="form-row">
-            <label class="form-label" for="model-id">Gemini Model ID</label>
-            <input type="text" id="model-id" class="form-input" value="gemini-3.5-flash-lite">
+            <label class="form-label" for="model-id">Live Model ID</label>
+            <input type="text" id="model-id" class="form-input" value="gemini-3.1-flash-live">
             <div class="preset-pills">
               <span>Presets:</span>
-              <button type="button" class="preset-pill" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Recommended)</button>
-              <button type="button" class="preset-pill" data-model="gemini-2.0-flash-lite">gemini-2.0-flash-lite</button>
-              <button type="button" class="preset-pill" data-model="gemini-2.5-flash">gemini-2.5-flash</button>
+              <button type="button" class="preset-pill" data-model="gemini-3.1-flash-live">gemini-3.1-flash-live (Live Audio + Gender/Tone)</button>
+              <button type="button" class="preset-pill" data-model="gemini-3.5-live-translate">gemini-3.5-live-translate</button>
+              <button type="button" class="preset-pill" data-model="gemini-3.5-transcribe-live">gemini-3.5-transcribe-live</button>
+              <button type="button" class="preset-pill" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite</button>
             </div>
-            <p class="form-tip">Flash Lite provides sub-second latency optimal for real-time video subtitles.</p>
+            <p class="form-tip">Live models stream audio over WebSocket without hitting the 15 RPM REST rate limit ceiling.</p>
           </div>
         </div>
       </section>
@@ -99,35 +99,11 @@
         </div>
       </section>
 
-      <!-- Section: Pipeline & Lookahead -->
-      <section id="section-pipeline" class="card-section">
-        <div class="card-header">
-          <h3>⚡ Pipeline & Lookahead Concurrency</h3>
-          <p>Control multi-worker parallel chunk dispatching and conversational context chaining.</p>
-        </div>
-        <div class="card-body">
-          <div class="grid-2-col">
-            <div class="form-row">
-              <label class="form-label">Parallel Request Concurrency: <span id="val-concurrency">3</span> workers</label>
-              <input type="range" id="slider-concurrency" min="1" max="5" step="1" value="3" class="form-range">
-              <p class="form-tip">Sends up to 3 chunks in parallel in advance for zero perceived latency.</p>
-            </div>
-            <div class="form-row">
-              <label class="form-label">Conversational Context Chaining</label>
-              <label class="checkbox-container">
-                <input type="checkbox" id="check-context-chaining" checked>
-                <span>Include previous sentence as context for consistent Serbian grammar and pronoun flow</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- Section: VAD & Timing -->
       <section id="section-vad" class="card-section">
         <div class="card-header">
           <h3>🎙️ Voice Activity Detection (VAD) & Timing</h3>
-          <p>Controls how speech chunks and programmatic timestamps are measured from the audio stream.</p>
+          <p>Controls speech sensitivity and timing boundaries.</p>
         </div>
         <div class="card-body">
           <div class="form-row">
@@ -143,12 +119,12 @@
             <div class="form-row">
               <label class="form-label">Silence Hangover (ms): <span id="val-silence">350</span> ms</label>
               <input type="range" id="slider-silence" min="200" max="800" step="50" value="350" class="form-range">
-              <p class="form-tip">Duration of silence before ending a subtitle line and dispatching.</p>
+              <p class="form-tip">Duration of silence before ending a subtitle line.</p>
             </div>
             <div class="form-row">
               <label class="form-label">Max Chunk Duration (ms): <span id="val-max-duration">5000</span> ms</label>
               <input type="range" id="slider-max-duration" min="3000" max="9000" step="500" value="5000" class="form-range">
-              <p class="form-tip">Maximum audio slice duration before splitting long sentences.</p>
+              <p class="form-tip">Maximum audio duration before splitting long sentences.</p>
             </div>
           </div>
         </div>

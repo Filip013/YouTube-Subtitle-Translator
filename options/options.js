@@ -14,10 +14,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const scriptTypeRadios = document.querySelectorAll('input[name="scriptType"]');
   const vadSensitivitySelect = document.getElementById('vad-sensitivity');
 
-  const sliderConcurrency = document.getElementById('slider-concurrency');
-  const valConcurrency = document.getElementById('val-concurrency');
-  const checkContextChaining = document.getElementById('check-context-chaining');
-
   const sliderSilence = document.getElementById('slider-silence');
   const valSilence = document.getElementById('val-silence');
   const sliderMaxDuration = document.getElementById('slider-max-duration');
@@ -42,11 +38,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    model: 'gemini-3.5-flash-lite',
+    model: 'gemini-3.1-flash-live',
     scriptType: 'latin',
     sensitivity: 'medium',
-    concurrency: 3,
-    enableContextChaining: true,
     silenceHangoverMs: 350,
     maxSpeechDurationMs: 5000,
     fontSize: 22,
@@ -58,18 +52,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load existing settings
   chrome.storage.sync.get(defaultSettings, (items) => {
     apiKeyInput.value = items.apiKey || '';
-    modelIdInput.value = items.model || 'gemini-3.5-flash-lite';
+    modelIdInput.value = items.model || 'gemini-3.1-flash-live';
 
     scriptTypeRadios.forEach(radio => {
       radio.checked = radio.value === items.scriptType;
     });
 
     vadSensitivitySelect.value = items.sensitivity || 'medium';
-
-    sliderConcurrency.value = items.concurrency || 3;
-    valConcurrency.textContent = sliderConcurrency.value;
-
-    checkContextChaining.checked = items.enableContextChaining !== false;
 
     sliderSilence.value = items.silenceHangoverMs || 350;
     valSilence.textContent = sliderSilence.value;
@@ -131,10 +120,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Slider input updates & preview
-  sliderConcurrency.addEventListener('input', () => {
-    valConcurrency.textContent = sliderConcurrency.value;
-  });
-
   sliderSilence.addEventListener('input', () => {
     valSilence.textContent = sliderSilence.value;
   });
@@ -182,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Test Connection
   btnTestApi.addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
-    const model = modelIdInput.value.trim() || 'gemini-3.5-flash-lite';
+    const model = modelIdInput.value.trim() || 'gemini-3.1-flash-live';
 
     if (!key) {
       showApiFeedback('Please enter an API key first.', 'error');
@@ -214,11 +199,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedScript = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
     const settings = {
       apiKey: apiKeyInput.value.trim(),
-      model: modelIdInput.value.trim() || 'gemini-3.5-flash-lite',
+      model: modelIdInput.value.trim() || 'gemini-3.1-flash-live',
       scriptType: selectedScript,
       sensitivity: vadSensitivitySelect.value,
-      concurrency: parseInt(sliderConcurrency.value, 10),
-      enableContextChaining: checkContextChaining.checked,
       silenceHangoverMs: parseInt(sliderSilence.value, 10),
       maxSpeechDurationMs: parseInt(sliderMaxDuration.value, 10),
       fontSize: parseInt(sliderFontSize.value, 10),

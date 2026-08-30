@@ -1,18 +1,20 @@
 /**
  * Audio Capture Engine for YouTube Subtitle Translator
  * Captures audio directly from HTML5 <video> element using Web Audio API,
- * pipes frames through VAD, and encodes speech slices into 16kHz PCM WAV.
+ * feeds 16kHz PCM frames to GeminiLiveClient, and processes VAD boundaries.
  */
 
 class AudioCaptureEngine {
   /**
    * @param {Object} options
-   * @param {VADProcessor} options.vadProcessor
-   * @param {Function} options.onSpeechChunk - Callback({ base64Audio, startMs, endMs, durationMs })
+   * @param {VADProcessor} [options.vadProcessor]
+   * @param {Function} [options.onPCMFrame] - Callback({ base64PCM, videoTimeSec })
+   * @param {Function} [options.onSpeechChunk] - Callback({ base64Audio, startMs, endMs, durationMs })
    */
   constructor(options = {}) {
-    this.vadProcessor = options.vadProcessor;
-    this.onSpeechChunk = options.onSpeechChunk;
+    this.vadProcessor = options.vadProcessor || null;
+    this.onPCMFrame = options.onPCMFrame || null;
+    this.onSpeechChunk = options.onSpeechChunk || null;
 
     this.videoElement = null;
     this.audioContext = null;
@@ -27,7 +29,6 @@ class AudioCaptureEngine {
     this._boundOnSeeked = this._handleSeeked.bind(this);
     this._boundOnEnded = this._handleEnded.bind(this);
 
-    // Link VAD callback to WAV encoder
     if (this.vadProcessor) {
       this.vadProcessor.onChunkReady = this._handleVADChunk.bind(this);
     }
@@ -44,7 +45,6 @@ class AudioCaptureEngine {
     this.detach();
     this.videoElement = video;
 
-    // Listen for video playback state changes
     this.videoElement.addEventListener('play', this._boundOnPlay);
     this.videoElement.addEventListener('pause', this._boundOnPause);
     this.videoElement.addEventListener('seeking', this._boundOnSeeking);
@@ -99,11 +99,9 @@ class AudioCaptureEngine {
     if (!this.videoElement) return;
 
     try {
-      // Create Web Audio context
       const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
       this.audioContext = new AudioCtxClass();
 
-      // Capture audio stream from video element
       let stream = null;
       if (typeof this.videoElement.captureStream === 'function') {
         stream = this.videoElement.captureStream();
@@ -127,17 +125,27 @@ class AudioCaptureEngine {
 
         const inputData = event.inputBuffer.getChannelData(0);
         const inputSampleRate = event.inputBuffer.sampleRate;
+        const videoTime = this.videoElement.currentTime;
 
         // Resample input audio buffer to 16kHz mono
         const resampled16k = AudioUtils.resampleTo16k(inputData, inputSampleRate, 16000);
 
-        // Feed into VAD processor with current video timestamp
+        // 1. Stream raw PCM to Live Client (WebSocket)
+        if (this.onPCMFrame) {
+          const base64PCM = AudioUtils.floatTo16BitPCMBase64(resampled16k);
+          this.onPCMFrame({
+            base64PCM,
+            videoTimeSec: videoTime
+          });
+        }
+
+        // 2. Feed into VAD processor
         if (this.vadProcessor) {
-          this.vadProcessor.processFrame(resampled16k, this.videoElement.currentTime);
+          this.vadProcessor.processFrame(resampled16k, videoTime);
         }
       };
 
-      // Connect through a zero-gain node to keep ScriptProcessor running without doubling speaker output
+      // Connect through a zero-gain node to keep ScriptProcessor running without altering speaker output
       this.silentGainNode = this.audioContext.createGain();
       this.silentGainNode.gain.value = 0;
 
@@ -146,7 +154,7 @@ class AudioCaptureEngine {
       this.silentGainNode.connect(this.audioContext.destination);
 
       this.isCapturing = true;
-      console.log('[GeminiSubtitles] Audio capture pipeline initialized successfully.');
+      console.log('[GeminiSubtitles] Audio capture pipeline initialized.');
     } catch (err) {
       console.error('[GeminiSubtitles] Failed to initialize Audio pipeline:', err);
     }
@@ -154,10 +162,7 @@ class AudioCaptureEngine {
 
   _handleVADChunk(vadChunk) {
     const { audioBuffer, sampleRate, startMs, endMs, durationMs } = vadChunk;
-
-    // Encode raw 16kHz PCM Float32Array to 16-bit PCM WAV ArrayBuffer
     const wavArrayBuffer = AudioUtils.encodeWAV(audioBuffer, sampleRate || 16000);
-    // Convert to Base64
     const base64Audio = AudioUtils.arrayBufferToBase64(wavArrayBuffer);
 
     if (this.onSpeechChunk) {

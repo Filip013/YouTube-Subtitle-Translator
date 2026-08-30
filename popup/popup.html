@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Gemini Subtitles</title>
+  <title>YouTube Gemini Live Subtitles</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
         <div class="logo-icon">✨</div>
         <div class="header-titles">
           <h1>YouTube Translate</h1>
-          <span class="badge">Gemini 3.5 Flash Lite</span>
+          <span class="badge">Gemini 3.1 Flash Live</span>
         </div>
       </div>
       <label class="switch" title="Toggle Subtitles">
@@ -37,6 +37,17 @@
             <span>Ћирилица</span>
             <small>Азбука</small>
           </button>
+        </div>
+      </div>
+
+      <!-- Live Stream Status Card -->
+      <div class="memory-card">
+        <div class="memory-info">
+          <span class="memory-icon">🟢</span>
+          <div>
+            <div class="memory-title">Live WebSocket Stream</div>
+            <div id="live-stream-status" class="memory-desc">Active • Hearing Tone & Gender</div>
+          </div>
         </div>
       </div>
 
