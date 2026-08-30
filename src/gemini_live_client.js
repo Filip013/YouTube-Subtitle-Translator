@@ -1,7 +1,8 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
  * Connects to Google's Multimodal Live API (gemini-3.1-flash-live-preview)
- * Streams live audio and translates directly into Serbian subtitles in real-time.
+ * Uses responseModalities: ["AUDIO"] (required by Multimodal Live API) and extracts
+ * real-time Serbian text subtitles from modelTurn parts without playing the audio stream.
  */
 
 class GeminiLiveClient {
@@ -191,7 +192,7 @@ Strict Rules:
       setup: {
         model: `models/${cleanModel}`,
         generationConfig: {
-          responseModalities: ['TEXT'],
+          responseModalities: ['AUDIO'],
           temperature: 0.1
         },
         systemInstruction: {
@@ -205,7 +206,7 @@ Strict Rules:
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
     this.lastServerMessage = `Setup sent (model: models/${cleanModel})`;
-    console.log('[GeminiLive] Setup handshake sent for models/' + cleanModel);
+    console.log('[GeminiLive] Setup handshake sent with responseModalities [AUDIO] for models/' + cleanModel);
   }
 
   sendAudioFrame(base64PCM, videoTimeSec) {
@@ -306,7 +307,7 @@ Strict Rules:
           }
         }
 
-        // 3. Handle model turn parts (Standard live model translation output)
+        // 3. Handle model turn text parts (Transcribed / translated text accompanying audio)
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
