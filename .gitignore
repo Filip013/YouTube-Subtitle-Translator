@@ -10,6 +10,12 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Secrets & Environment
+.env
+.env.*
+test_secrets.json
+test_audio.wav
+
 # IDE & Editor
 .vscode/
 .idea/

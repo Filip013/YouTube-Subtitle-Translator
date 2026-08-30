@@ -1,7 +1,8 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator
- * Flash Live Translation Mode (gemini-3.5-live-translate-preview over WebSocket)
- * Zero REST API quota consumed - Streams live audio and generates Serbian subtitles in real time.
+ * Two-Stage Live Pipeline:
+ * Stage 1: gemini-3.5-transcribe-live (Google Live WebSocket ASR - 0 REST quota)
+ * Stage 2: GeminiTextTranslator (Fast, grammatically accurate Serbian translation with quota fallback)
  */
 
 (function () {
@@ -10,7 +11,8 @@
   let currentVideoId = null;
   let vadProcessor = null;
   let audioCapture = null;
-  let liveClient = null;
+  let transcribeClient = null;
+  let textTranslator = null;
   let storageManager = null;
   let subtitleRenderer = null;
   let isInitialized = false;
@@ -18,11 +20,12 @@
   // Real-time telemetry state
   const diagnostics = {
     videoId: null,
-    mode: 'Live Translate (gemini-3.5-live-translate-preview)',
+    mode: 'Two-Stage Live Pipeline (Transcribe + Serbian Translate)',
     status: 'Initializing...',
     audioLevel: 0,
     framesSent: 0,
     cuesSaved: 0,
+    lastTranscribed: '',
     lastTranslated: '',
     wsInfo: null,
     lastError: null,
@@ -33,9 +36,11 @@
   const config = {
     enabled: true,
     apiKey: '',
-    liveModel: 'gemini-3.5-live-translate-preview',
+    transcribeModel: 'gemini-3.5-transcribe-live',
+    translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
+    showDualSubtitles: false,
     sensitivity: 'medium',
     fontSize: 22,
     fontColor: '#ffffff',
@@ -44,7 +49,7 @@
   };
 
   function publishDiagnostics(extra = {}) {
-    const wsInfo = liveClient ? liveClient.getDebugInfo() : null;
+    const wsInfo = transcribeClient ? transcribeClient.getDebugInfo() : null;
 
     Object.assign(diagnostics, extra, {
       videoId: currentVideoId,
@@ -98,17 +103,23 @@
       fontColor: config.fontColor,
       backgroundColor: config.backgroundColor,
       bottomOffset: config.bottomOffset,
-      showDualSubtitles: false
+      showDualSubtitles: config.showDualSubtitles
     });
     subtitleRenderer.setEnabled(config.enabled);
 
-    // 3. Initialize Flash Live Client (WebSocket Direct Translation)
-    liveClient = new GeminiLiveClient({
+    // 3. Initialize Stage 2 Text Translator
+    textTranslator = new GeminiTextTranslator({
       apiKey: config.apiKey,
-      model: config.liveModel,
+      model: config.translateModel,
       scriptType: config.scriptType,
-      speakerGender: config.speakerGender,
-      onSubtitleChunk: handleSubtitleChunk,
+      speakerGender: config.speakerGender
+    });
+
+    // 4. Initialize Stage 1 Live Transcribe Client (WebSocket Speech-to-Text)
+    transcribeClient = new GeminiTranscribeClient({
+      apiKey: config.apiKey,
+      model: config.transcribeModel,
+      onTranscriptChunk: handleTranscriptChunk,
       onStatusChange: (status, msg) => {
         publishDiagnostics({ status: msg, lastError: status === 'error' ? msg : null });
         if (status === 'connecting') {
@@ -122,20 +133,20 @@
       }
     });
 
-    // 4. Initialize VAD Processor
+    // 5. Initialize VAD Processor
     vadProcessor = new VADProcessor({
       sampleRate: 16000,
       sensitivity: config.sensitivity
     });
 
-    // 5. Initialize Audio Capture Engine
+    // 6. Initialize Audio Capture Engine
     audioCapture = new AudioCaptureEngine({
       vadProcessor: vadProcessor,
       onPCMFrame: (pcmFrame) => {
-        if (!config.enabled || !config.apiKey || !liveClient) return;
+        if (!config.enabled || !config.apiKey || !transcribeClient) return;
 
-        // Stream audio continuously to Flash Live WebSocket
-        liveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
+        // Stream audio continuously to Live Transcribe WebSocket
+        transcribeClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
         diagnostics.framesSent++;
         diagnostics.audioLevel = Math.round((pcmFrame.rms || 0) * 100);
 
@@ -146,7 +157,7 @@
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Flash Live Translation Mode initialized with model:', config.liveModel);
+    console.log('[GeminiSubtitles] Two-Stage Pipeline Initialized: Transcribe (' + config.transcribeModel + ') + Translate (' + config.translateModel + ')');
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -157,10 +168,17 @@
           if (key === 'scriptType') scriptChanged = true;
         }
 
-        if (liveClient) {
-          liveClient.updateConfig({
+        if (transcribeClient) {
+          transcribeClient.updateConfig({
             apiKey: config.apiKey,
-            model: config.liveModel,
+            model: config.transcribeModel
+          });
+        }
+
+        if (textTranslator) {
+          textTranslator.updateConfig({
+            apiKey: config.apiKey,
+            model: config.translateModel,
             scriptType: config.scriptType,
             speakerGender: config.speakerGender
           });
@@ -179,7 +197,7 @@
             fontColor: config.fontColor,
             backgroundColor: config.backgroundColor,
             bottomOffset: config.bottomOffset,
-            showDualSubtitles: false
+            showDualSubtitles: config.showDualSubtitles
           });
         }
 
@@ -195,8 +213,8 @@
         if (storageManager) {
           storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
             if (subtitleRenderer) subtitleRenderer.clear();
-            if (liveClient) liveClient.resetStream();
-            publishDiagnostics({ cuesSaved: 0, lastTranslated: '' });
+            if (transcribeClient) transcribeClient.resetStream();
+            publishDiagnostics({ cuesSaved: 0, lastTranscribed: '', lastTranslated: '' });
             sendResponse({ success: true });
           });
           return true;
@@ -236,25 +254,36 @@
   }
 
   /**
-   * Handles incoming live translated Serbian subtitles from Flash Live WebSocket
+   * Handles incoming transcription chunks from Live WebSocket ASR
    */
-  async function handleSubtitleChunk(chunkData) {
+  async function handleTranscriptChunk(chunkData) {
     if (!config.enabled || !currentVideoId) return;
 
-    const subtitleText = (chunkData.text || '').trim();
-    if (!subtitleText) return;
+    const transcriptText = (chunkData.text || '').trim();
+    if (!transcriptText) return;
 
     const title = getVideoTitle();
 
     if (!chunkData.isFinal) {
-      // 1. Real-time streaming subtitle preview
-      subtitleRenderer.setLiveCue(subtitleText, chunkData.startMs, chunkData.endMs);
-      publishDiagnostics({ lastTranslated: subtitleText });
+      // 1. Live interim speech preview on player overlay
+      subtitleRenderer.setLiveCue(transcriptText, chunkData.startMs, chunkData.endMs);
+      publishDiagnostics({ lastTranscribed: transcriptText });
     } else {
-      // 2. Finalized Serbian sentence: Save directly to disk (chrome.storage.local) and add as permanent cue
+      // 2. Finalized sentence from Stage 1: Send to Stage 2 Text Translator
+      const englishText = transcriptText;
+
+      publishDiagnostics({
+        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        lastTranscribed: englishText
+      });
+
+      // Translate clean transcript into natural Serbian via Flash Lite (~60ms)
+      const serbianText = await textTranslator.translateText(englishText);
+      const displayText = serbianText || englishText;
+
       const cue = {
-        text: subtitleText,
-        originalText: '',
+        text: displayText,
+        originalText: englishText,
         startMs: chunkData.startMs,
         endMs: chunkData.endMs
       };
@@ -264,11 +293,12 @@
       if (storageManager) {
         await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
         publishDiagnostics({
-          status: 'Saved Serbian subtitle to disk!',
-          lastTranslated: subtitleText,
+          status: 'Fragment translated & saved!',
+          lastTranscribed: englishText,
+          lastTranslated: displayText,
           cuesSaved: subtitleRenderer.getCues().length
         });
-        console.log(`[GeminiSubtitles] 💾 Persisted Serbian subtitle [${cue.startMs}ms - ${cue.endMs}ms]: "${subtitleText}"`);
+        console.log(`[GeminiSubtitles] 💾 Persisted subtitle: "${englishText}" -> "${displayText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
       }
     }
   }
@@ -277,14 +307,14 @@
    * Check for YouTube player element and attach capture idempotently
    */
   async function checkAndAttachPlayer() {
-    if (!isInitialized || !subtitleRenderer || !storageManager || !liveClient || !audioCapture) {
+    if (!isInitialized || !subtitleRenderer || !storageManager || !transcribeClient || !audioCapture) {
       return;
     }
 
     const videoId = StorageManager.extractVideoId(window.location.href);
     if (!videoId) {
       if (audioCapture) audioCapture.detach();
-      if (liveClient) liveClient.disconnect();
+      if (transcribeClient) transcribeClient.disconnect();
       if (subtitleRenderer) subtitleRenderer.clear();
       currentVideoId = null;
       publishDiagnostics({ status: 'Not on a YouTube video page' });
@@ -302,9 +332,9 @@
         diagnostics.framesSent = 0;
         if (subtitleRenderer) subtitleRenderer.clear();
         if (vadProcessor) vadProcessor.reset();
-        if (liveClient) {
-          liveClient.resetStream();
-          liveClient.connect();
+        if (transcribeClient) {
+          transcribeClient.resetStream();
+          transcribeClient.connect();
         }
       }
 
