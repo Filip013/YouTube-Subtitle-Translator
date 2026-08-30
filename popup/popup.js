@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    liveModel: 'gemini-2.0-flash-exp',
+    liveModel: 'gemini-3.5-live-translate-preview',
     scriptType: 'latin',
     speakerGender: 'auto',
     sensitivity: 'medium'
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const diag = res.yt_live_diagnostics;
             if (diag) {
               let logText = `[Video ID] ${diag.videoId || activeVideoId}\n`;
-              logText += `[Mode] ${diag.mode || 'Flash Live Translate'}\n`;
+              logText += `[Mode] ${diag.mode || 'Live Translate'}\n`;
               logText += `[Status] ${diag.status || 'Active'}\n`;
               logText += `[PCM Frames] ${diag.framesSent || 0} sent\n`;
               logText += `[Saved in Storage] ${cues.length} subtitles\n`;
@@ -191,7 +191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTestConnection.textContent = '⏳ Testing...';
     hideFeedback();
 
-    const result = await GeminiService.testConnection(key, 'gemini-2.5-flash');
+    const result = await GeminiService.testConnection(key, 'gemini-3.5-live-translate-preview');
     btnTestConnection.disabled = false;
     btnTestConnection.textContent = '⚡ Test API';
 

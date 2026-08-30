@@ -1,13 +1,13 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator (End-to-End Live Translation)
- * Connects to Google's Multimodal Live API over WebSockets (gemini-2.0-flash-exp / gemini-3.1-flash-live)
+ * Connects to Google's Multimodal Live API over WebSockets (gemini-3.5-live-translate-preview)
  * Streams 16kHz PCM audio and outputs real-time translated Serbian subtitles with zero REST API calls.
  */
 
 class GeminiLiveClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-2.0-flash-exp';
+    this.model = config.model || 'gemini-3.5-live-translate-preview';
     this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
     this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 
@@ -264,6 +264,49 @@ Strict Rules:
       }
 
       if (data.serverContent) {
+        // Handle interim translated stream
+        if (data.serverContent.interimInputTranscription) {
+          const interimText = data.serverContent.interimInputTranscription.text;
+          if (interimText) {
+            this.currentUtterance = interimText;
+            this.lastServerMessage = `Live: "${interimText.trim()}"`;
+            if (this.onSubtitleChunk) {
+              this.onSubtitleChunk({
+                text: interimText.trim(),
+                startMs: this.turnStartVideoTimeMs,
+                endMs: this.lastAudioVideoTimeMs + 1500,
+                isFinal: false
+              });
+            }
+          }
+        }
+
+        // Handle finalized translation
+        if (data.serverContent.inputTranscription) {
+          const finalText = data.serverContent.inputTranscription.text;
+          if (finalText && finalText.trim()) {
+            const cleanFinal = finalText.trim();
+            this.lastServerMessage = `Final: "${cleanFinal}"`;
+            this.totalWordsTranslated += cleanFinal.split(/\s+/).filter(Boolean).length;
+
+            const startMs = this.turnStartVideoTimeMs;
+            const endMs = Math.max(startMs + 1000, this.lastAudioVideoTimeMs);
+
+            if (this.onSubtitleChunk) {
+              this.onSubtitleChunk({
+                text: cleanFinal,
+                startMs: startMs,
+                endMs: endMs,
+                isFinal: true
+              });
+            }
+
+            this.currentUtterance = '';
+            this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
+          }
+        }
+
+        // Handle model turn parts
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
@@ -272,7 +315,6 @@ Strict Rules:
               this.totalWordsTranslated += part.text.split(/\s+/).filter(Boolean).length;
               this.lastServerMessage = `Live: "${this.currentUtterance.trim()}"`;
 
-              // 1. Emit live streaming Serbian translation preview
               if (this.onSubtitleChunk) {
                 this.onSubtitleChunk({
                   text: this.currentUtterance.trim(),
@@ -282,7 +324,6 @@ Strict Rules:
                 });
               }
 
-              // 2. Finalize when sentence ends or threshold reached
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
               const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 5;
