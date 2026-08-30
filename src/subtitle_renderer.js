@@ -11,7 +11,8 @@ class SubtitleRenderer {
     this.videoElement = null;
     this.playerContainer = null;
 
-    this.cues = []; // Sorted list of { id, text, startMs, endMs }
+    this.cues = []; // Sorted list of finalized { id, text, startMs, endMs }
+    this.liveCue = null; // Temporary active streaming cue
     this.currentCue = null;
     this.rafId = null;
     this.isEnabled = true;
@@ -27,7 +28,7 @@ class SubtitleRenderer {
 
   /**
    * Initializes overlay inside the YouTube player element
-   * @param {HTMLElement} playerContainer - YouTube player DOM element (e.g. #movie_player)
+   * @param {HTMLElement} playerContainer
    * @param {HTMLVideoElement} videoElement
    */
   init(playerContainer, videoElement) {
@@ -36,7 +37,7 @@ class SubtitleRenderer {
     this.playerContainer = playerContainer;
     this.videoElement = videoElement;
 
-    this.destroy(); // Clean up any existing overlay
+    this.destroy();
     this._createDOM();
     this._startSyncLoop();
   }
@@ -75,7 +76,22 @@ class SubtitleRenderer {
   }
 
   /**
-   * Adds or updates a translated subtitle cue
+   * Sets temporary live streaming cue (displayed during speech generation)
+   */
+  setLiveCue(text, startMs, endMs) {
+    if (!text) {
+      this.liveCue = null;
+      return;
+    }
+    this.liveCue = {
+      text: text,
+      startMs: startMs,
+      endMs: endMs
+    };
+  }
+
+  /**
+   * Adds or updates a finalized translated subtitle cue
    * @param {Object} cue - { text: string, startMs: number, endMs: number }
    */
   addCue(cue) {
@@ -88,12 +104,10 @@ class SubtitleRenderer {
       endMs: cue.endMs
     };
 
-    // Remove any existing cue with identical ID or overlapping start range
     this.cues = this.cues.filter(c => c.id !== newCue.id);
     this.cues.push(newCue);
-
-    // Keep cues sorted by start time
     this.cues.sort((a, b) => a.startMs - b.startMs);
+    this.liveCue = null;
   }
 
   /**
@@ -111,7 +125,7 @@ class SubtitleRenderer {
   }
 
   /**
-   * Checks if a subtitle cue already covers the given timestamp
+   * Checks if a finalized subtitle cue already covers the given timestamp
    * @param {number} currentTimeMs 
    * @returns {boolean}
    */
@@ -158,8 +172,16 @@ class SubtitleRenderer {
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
+    // 1. Check if we have an active live streaming cue
+    if (this.liveCue && currentTimeMs >= this.liveCue.startMs - 500 && currentTimeMs <= this.liveCue.endMs + 1000) {
+      this.textElement.textContent = this.liveCue.text;
+      this.textElement.classList.add('visible');
+      return;
+    }
+
+    // 2. Otherwise look in finalized cues
     const activeCue = this.cues.find(
-      c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs + 250
+      c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs + 300
     );
 
     if (activeCue) {
@@ -189,6 +211,7 @@ class SubtitleRenderer {
 
   clear() {
     this.cues = [];
+    this.liveCue = null;
     this.currentCue = null;
     if (this.textElement) {
       this.textElement.textContent = '';

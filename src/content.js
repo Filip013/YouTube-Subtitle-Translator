@@ -100,14 +100,7 @@
       onPCMFrame: (pcmFrame) => {
         if (!config.enabled || !config.apiKey || !geminiLiveClient) return;
 
-        const currentTimeMs = Math.round(pcmFrame.videoTimeSec * 1000);
-
-        // SKIPPING ALREADY SUBTITLED SECTIONS:
-        // If a subtitle already exists at this timestamp, do NOT send audio to LLM.
-        if (subtitleRenderer && subtitleRenderer.hasCueAtTime(currentTimeMs)) {
-          return;
-        }
-
+        // Continuous streaming to Live WebSocket API without local blocking
         geminiLiveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
       }
     });
@@ -194,19 +187,23 @@
   function handleLiveSubtitleChunk(subtitleData) {
     if (!config.enabled || !currentVideoId) return;
 
-    const cue = {
-      text: subtitleData.text,
-      startMs: subtitleData.startMs,
-      endMs: subtitleData.endMs
-    };
+    if (!subtitleData.isFinal) {
+      // Real-time live preview update
+      subtitleRenderer.setLiveCue(subtitleData.text, subtitleData.startMs, subtitleData.endMs);
+    } else {
+      // Finalized sentence cue
+      const cue = {
+        text: subtitleData.text,
+        startMs: subtitleData.startMs,
+        endMs: subtitleData.endMs
+      };
 
-    // Render subtitle immediately on screen
-    subtitleRenderer.addCue(cue);
+      subtitleRenderer.addCue(cue);
 
-    // Save final completed sentences into persistent memory with video title
-    if (subtitleData.isFinal && storageManager) {
-      const title = getVideoTitle();
-      storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+      if (storageManager) {
+        const title = getVideoTitle();
+        storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+      }
     }
   }
 

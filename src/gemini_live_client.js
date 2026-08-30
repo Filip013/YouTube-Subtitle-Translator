@@ -1,7 +1,7 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
  * Connects to Google's Multimodal Live API over WebSockets (gemini-3.1-flash-live)
- * for real-time speech listening, gender/tone detection, and Serbian subtitle streaming.
+ * for real-time speech listening, gender/tone detection, and sequential Serbian subtitle streaming.
  */
 
 class GeminiLiveClient {
@@ -118,7 +118,7 @@ CRITICAL RULES:
 1. Pay close attention to speaker vocal pitch, gender, tone, and emotion to choose the correct Serbian past tense and adjective gender forms (e.g. bio sam vs bila sam, rekao sam vs rekla sam, srećan vs srećna).
 2. Output ONLY the translated Serbian subtitle text.
 3. DO NOT output conversational replies, conversational filler, greetings, timestamps, or quotes.
-4. Output text in short, concise subtitle lines as speech progresses.
+4. Output text continuously in short, concise subtitle lines as speech progresses.
 5. If there is only background music, ambient noise, laughter, or silence, DO NOT output anything.`;
 
     const setupPayload = {
@@ -159,7 +159,7 @@ CRITICAL RULES:
     const currentMs = Math.round(videoTimeSec * 1000);
     this.lastAudioVideoTimeMs = currentMs;
 
-    if (this.currentUtterance === '') {
+    if (this.turnStartVideoTimeMs === 0) {
       this.turnStartVideoTimeMs = Math.max(0, currentMs - 200);
     }
 
@@ -195,7 +195,7 @@ CRITICAL RULES:
             if (part.text) {
               this.currentUtterance += part.text;
               
-              // Emit incremental live update for immediate visual responsiveness
+              // 1. Emit live streaming update
               if (this.onSubtitleChunk) {
                 this.onSubtitleChunk({
                   text: this.currentUtterance.trim(),
@@ -204,36 +204,48 @@ CRITICAL RULES:
                   isFinal: false
                 });
               }
+
+              // 2. If sentence delimiter reached (. ! ? \n) and length is sufficient, finalize clause
+              const trimmed = this.currentUtterance.trim();
+              if (/[.!?\n]$/.test(trimmed) && trimmed.length >= 10) {
+                this._finalizeCurrentUtterance();
+              }
             }
           }
         }
 
-        // Turn complete: finalize sentence / subtitle cue
+        // Turn complete: finalize sentence
         if (data.serverContent.turnComplete) {
-          const finalText = this.currentUtterance.trim();
-          if (finalText && finalText !== '[EMPTY]') {
-            const startMs = this.turnStartVideoTimeMs;
-            const endMs = Math.max(startMs + 1200, this.lastAudioVideoTimeMs + 400);
-
-            if (this.onSubtitleChunk) {
-              this.onSubtitleChunk({
-                text: finalText,
-                startMs: startMs,
-                endMs: endMs,
-                isFinal: true
-              });
-            }
-          }
-          this.currentUtterance = '';
+          this._finalizeCurrentUtterance();
         }
 
         if (data.serverContent.interrupted) {
           this.currentUtterance = '';
+          this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
         }
       }
     } catch (err) {
       console.error('[GeminiLive] Error parsing server message:', err);
     }
+  }
+
+  _finalizeCurrentUtterance() {
+    const finalText = this.currentUtterance.trim();
+    if (finalText && finalText !== '[EMPTY]') {
+      const startMs = this.turnStartVideoTimeMs;
+      const endMs = Math.max(startMs + 1200, this.lastAudioVideoTimeMs + 300);
+
+      if (this.onSubtitleChunk) {
+        this.onSubtitleChunk({
+          text: finalText,
+          startMs: startMs,
+          endMs: endMs,
+          isFinal: true
+        });
+      }
+    }
+    this.currentUtterance = '';
+    this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
   }
 
   /**
@@ -272,6 +284,7 @@ CRITICAL RULES:
     this.isConnecting = false;
     this.isSetupComplete = false;
     this.currentUtterance = '';
+    this.turnStartVideoTimeMs = 0;
     this._emitStatus('disconnected', 'Disconnected.');
   }
 
