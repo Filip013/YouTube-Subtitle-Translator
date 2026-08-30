@@ -3,10 +3,11 @@
  * Classical Closed Caption Engine (Netflix / Movie Style)
  * 
  * Features:
- * 1. Forward Reading Window: Ensures live-translated sentences stay comfortably visible
- *    for >= 3.0 seconds after the sentence finishes speaking in real time.
- * 2. Pre-Buffered Replay Support: Perfectly synchronized to speech timestamps on seek/replay.
- * 3. Classical Captions: Zero typewriter jitter; full, ready-to-read sentences only.
+ * 1. Clean Non-Blocking Transitions: Automatically yields when the next sentence starts,
+ *    preventing old cues from lingering and blocking incoming subtitles.
+ * 2. Active Cue Resolution: Searches newest-first to ensure on-screen text always reflects
+ *    the active speech turn.
+ * 3. Forward Reading Window: Guarantees >= 2.8s display time if no subsequent subtitle follows immediately.
  * 4. Dual Subtitle Support: Optional original English + Serbian translation.
  */
 
@@ -107,7 +108,7 @@ class SubtitleRenderer {
   }
 
   /**
-   * Adds a completed, classical sentence cue with forward reading window
+   * Adds a completed, classical sentence cue with automatic truncation of previous overlapping cues
    * @param {Object} cue - { text: string, originalText?: string, startMs: number, endMs: number }
    * @param {number} [currentPlaybackMs] - Current video playback position in ms
    */
@@ -117,12 +118,11 @@ class SubtitleRenderer {
     const cleanText = cue.text.trim();
     if (!cleanText) return;
 
-    // Minimum reading time (>= 2.8s or ~380ms per word)
+    // Minimum reading time (>= 2.6s or ~360ms per word)
     const wordCount = cleanText.split(/\s+/).length;
-    const readingDurationMs = Math.max(2800, wordCount * 380);
+    const readingDurationMs = Math.max(2600, wordCount * 360);
 
     const baseEnd = Math.max(cue.endMs, cue.startMs + readingDurationMs);
-    // If watching live, extend endMs forward from current playback time so user has time to read
     const liveEnd = currentPlaybackMs > 0 ? Math.max(baseEnd, currentPlaybackMs + readingDurationMs) : baseEnd;
 
     const newCue = {
@@ -133,8 +133,15 @@ class SubtitleRenderer {
       endMs: liveEnd
     };
 
-    // Remove overlapping/duplicate cues
-    this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 800);
+    // Cleanly truncate any previous overlapping cue so it ends when the new one begins
+    this.cues.forEach(c => {
+      if (c.startMs < newCue.startMs && c.endMs > newCue.startMs) {
+        c.endMs = newCue.startMs;
+      }
+    });
+
+    // Remove duplicates starting around the same timestamp
+    this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 400);
     this.cues.push(newCue);
     this.cues.sort((a, b) => a.startMs - b.startMs);
   }
@@ -183,14 +190,15 @@ class SubtitleRenderer {
   }
 
   /**
-   * Classical Movie Caption Renderer:
-   * Only renders complete sentences when the video playback reaches their exact timestamp window.
+   * Classical Caption Resolution:
+   * Finds the most recent active cue at the current playback timestamp.
    */
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
-    const activeCue = this.cues.find(
-      c => currentTimeMs >= c.startMs - 200 && currentTimeMs <= c.endMs + 300
+    // Search newest to oldest for the exact active cue at currentTimeMs
+    const activeCue = [...this.cues].reverse().find(
+      c => currentTimeMs >= c.startMs - 150 && currentTimeMs <= c.endMs + 200
     );
 
     if (activeCue) {
