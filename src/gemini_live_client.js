@@ -1,11 +1,10 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
  * Connects directly to gemini-3.5-live-translate-preview over v1alpha BidiGenerateContent.
- * Uses exact Google Protobuf schema:
- * - setup.generationConfig.translationConfig: { targetLanguageCode: 'sr' }
- * - setup.generationConfig.responseModalities: ['AUDIO']
- * - outputAudioTranscription: {}
- * - Smooth Utterance Accumulator: Assembles streaming translation tokens into complete sentences.
+ * Full-Sentence Classical Segmentation:
+ * - Accumulates streaming tokens in the background
+ * - Finalizes on complete sentence punctuation (. ? !)
+ * - Renders classical, movie-style subtitles with zero word-by-word jitter
  */
 
 class GeminiLiveClient {
@@ -243,20 +242,19 @@ class GeminiLiveClient {
       }
 
       if (data.serverContent) {
-        // 1. Accumulate outputTranscription chunks (Direct Serbian streaming tokens)
+        // 1. Accumulate streaming Serbian translation tokens in background
         if (data.serverContent.outputTranscription?.text) {
           const outText = data.serverContent.outputTranscription.text;
           
-          // Append seamlessly (handling spacing)
           if (!this.currentUtterance || this.currentUtterance.endsWith(' ') || outText.startsWith(' ')) {
             this.currentUtterance += outText;
           } else {
             this.currentUtterance += ' ' + outText;
           }
 
-          this.lastServerMessage = `Live SR: "${this.currentUtterance.trim()}"`;
+          this.lastServerMessage = `Translating: "${this.currentUtterance.trim()}"`;
 
-          // Live visual update on subtitle overlay
+          // Keep background telemetry updated without triggering on-screen typewriter effect
           if (this.onSubtitleChunk) {
             this.onSubtitleChunk({
               text: this.currentUtterance.trim(),
@@ -266,13 +264,11 @@ class GeminiLiveClient {
             });
           }
 
-          // Check if a complete sentence is formed
+          // Finalize strictly on sentence-ending punctuation (. ? !)
           const trimmed = this.currentUtterance.trim();
-          const hasPunctuation = /[.!?]$/.test(trimmed) && trimmed.length >= 6;
-          const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
-          const isLongPhrase = durationMs >= 3200 && trimmed.length >= 15;
+          const hasPunctuation = /[.!?]$/.test(trimmed) && trimmed.length >= 8;
 
-          if (hasPunctuation || isLongPhrase) {
+          if (hasPunctuation) {
             this._finalizeCurrentUtterance();
           }
         }
@@ -285,13 +281,9 @@ class GeminiLiveClient {
               if (!this.currentUtterance.includes(part.text)) {
                 this.currentUtterance += ' ' + part.text;
               }
-              if (this.onSubtitleChunk) {
-                this.onSubtitleChunk({
-                  text: this.currentUtterance.trim(),
-                  startMs: this.turnStartVideoTimeMs,
-                  endMs: this.lastAudioVideoTimeMs + 1500,
-                  isFinal: false
-                });
+              const trimmed = this.currentUtterance.trim();
+              if (/[.!?]$/.test(trimmed) && trimmed.length >= 8) {
+                this._finalizeCurrentUtterance();
               }
             }
           }
