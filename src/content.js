@@ -37,7 +37,7 @@
     translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
-    showDualSubtitles: false,
+    showDualSubtitles: true, // Enable Dual Subtitles by default so user can see English + Serbian
     sensitivity: 'medium',
     fontSize: 22,
     fontColor: '#ffffff',
@@ -139,19 +139,13 @@
       onPCMFrame: (pcmFrame) => {
         if (!config.enabled || !config.apiKey || !transcribeClient) return;
 
-        const currentTimeMs = Math.round(pcmFrame.videoTimeSec * 1000);
-
-        // Skip sending audio for already subtitled sections
-        if (subtitleRenderer && subtitleRenderer.hasCueAtTime(currentTimeMs)) {
-          return;
-        }
-
+        // Continuous streaming to Live WebSocket ASR
         transcribeClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
         diagnostics.framesSent++;
         diagnostics.audioLevel = Math.round((pcmFrame.rms || 0) * 100);
 
         if (diagnostics.framesSent % 20 === 0) {
-          publishDiagnostics({ status: `Streaming audio (Level: ${diagnostics.audioLevel}%)` });
+          publishDiagnostics({ status: `Streaming audio (Signal: ${diagnostics.audioLevel}%)` });
         }
       }
     });
@@ -233,7 +227,7 @@
     if (!storageManager || !subtitleRenderer || !videoId) return;
 
     try {
-      const storedCues = await storageManager.loadSubtitles(videoId, config.scriptType);
+      const storedCues = await storageManager.loadSubtitles(videoId);
       if (storedCues && storedCues.length > 0) {
         console.log(`[GeminiSubtitles] Loaded ${storedCues.length} remembered subtitles for video: ${videoId}`);
         storedCues.forEach(cue => subtitleRenderer.addCue(cue));
@@ -267,7 +261,7 @@
       const englishText = chunkData.text;
       const title = getVideoTitle();
 
-      // 1. Immediately save the transcript cue so progress is NEVER lost!
+      // 1. IMMEDIATELY SAVE THE TRANSCRIPT CUE SO PROGRESS IS 100% STORED TO DISK
       const initialCue = {
         text: englishText,
         originalText: englishText,
@@ -280,34 +274,34 @@
       }
 
       publishDiagnostics({
-        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        status: `Saved transcript. Translating: "${englishText.substring(0, 30)}..."`,
         lastTranscribed: englishText,
         cuesSaved: subtitleRenderer.getCues().length
       });
 
-      // 2. Stage 2: Translate English sentence to natural Serbian via Flash Lite
-      const serbianText = await textTranslator.translateText(englishText);
+      // 2. Stage 2: Translate English sentence to natural Serbian via Flash Lite in parallel
+      textTranslator.translateText(englishText).then(async (serbianText) => {
+        if (serbianText && serbianText !== englishText) {
+          const translatedCue = {
+            text: serbianText,
+            originalText: englishText,
+            startMs: chunkData.startMs,
+            endMs: chunkData.endMs
+          };
 
-      if (serbianText && serbianText !== englishText) {
-        const translatedCue = {
-          text: serbianText,
-          originalText: englishText,
-          startMs: chunkData.startMs,
-          endMs: chunkData.endMs
-        };
+          subtitleRenderer.addCue(translatedCue);
 
-        subtitleRenderer.addCue(translatedCue);
-
-        if (storageManager) {
-          await storageManager.saveCue(currentVideoId, config.scriptType, translatedCue, title);
-          publishDiagnostics({
-            status: 'Fragment translated & saved!',
-            lastTranslated: serbianText,
-            cuesSaved: subtitleRenderer.getCues().length
-          });
-          console.log(`[GeminiSubtitles] Saved translated fragment: "${englishText}" -> "${serbianText}" [${translatedCue.startMs}ms - ${translatedCue.endMs}ms]`);
+          if (storageManager) {
+            await storageManager.saveCue(currentVideoId, config.scriptType, translatedCue, title);
+            publishDiagnostics({
+              status: 'Fragment translated & saved to storage!',
+              lastTranslated: serbianText,
+              cuesSaved: subtitleRenderer.getCues().length
+            });
+            console.log(`[GeminiSubtitles] ✅ Updated translated fragment: "${englishText}" -> "${serbianText}" [${translatedCue.startMs}ms - ${translatedCue.endMs}ms]`);
+          }
         }
-      }
+      });
     }
   }
 

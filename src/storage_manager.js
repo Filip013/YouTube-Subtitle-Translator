@@ -1,6 +1,6 @@
 /**
  * Storage Manager for YouTube Subtitle Translator
- * Rock-solid persistence of video subtitle tracks and fragments in chrome.storage.local
+ * Guarantees direct, immediate persistence to chrome.storage.local on every chunk
  */
 
 class StorageManager {
@@ -40,10 +40,9 @@ class StorageManager {
   /**
    * Loads all saved subtitle cues for a specific video
    * @param {string} videoId 
-   * @param {string} [scriptType]
    * @returns {Promise<Array<{id: string, text: string, originalText?: string, startMs: number, endMs: number}>>}
    */
-  async loadSubtitles(videoId, scriptType = 'latin') {
+  async loadSubtitles(videoId) {
     const cleanId = String(videoId || '').trim();
     if (!cleanId) return [];
 
@@ -56,7 +55,6 @@ class StorageManager {
         return;
       }
 
-      // Check unified key and legacy keys for backwards compatibility
       const legacyLatinKey = `yt_subs_${cleanId}_latin`;
       const legacyCyrillicKey = `yt_subs_${cleanId}_cyrillic`;
 
@@ -73,14 +71,14 @@ class StorageManager {
         }
 
         this.inMemoryCache.set(key, cues);
-        console.log(`[StorageManager] Loaded ${cues.length} saved cues for video [${cleanId}]`);
+        console.log(`[StorageManager] ✅ Loaded ${cues.length} saved fragments from storage for video [${cleanId}]`);
         resolve(cues);
       });
     });
   }
 
   /**
-   * Saves or merges a subtitle cue immediately into chrome.storage.local
+   * Saves or updates a subtitle cue IMMEDIATELY into chrome.storage.local
    * @param {string} videoId 
    * @param {string} scriptType 
    * @param {Object} cue - { startMs: number, endMs: number, text: string, originalText?: string }
@@ -95,18 +93,19 @@ class StorageManager {
     const cueItem = {
       id: `${cue.startMs}_${cue.endMs}`,
       text: (cue.text || cue.originalText || '').trim(),
-      originalText: cue.originalText ? cue.originalText.trim() : '',
+      originalText: cue.originalText ? cue.originalText.trim() : (cue.text || '').trim(),
       startMs: cue.startMs,
       endMs: cue.endMs
     };
 
-    // Update in-memory cache immediately
+    // 1. Update in-memory cache synchronously
     const existingCached = this.inMemoryCache.get(key) || [];
     const filteredCached = existingCached.filter(c => c.id !== cueItem.id);
     filteredCached.push(cueItem);
     filteredCached.sort((a, b) => a.startMs - b.startMs);
     this.inMemoryCache.set(key, filteredCached);
 
+    // 2. Direct write to chrome.storage.local
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
         resolve();
@@ -137,7 +136,6 @@ class StorageManager {
         existingRecord.cues = mergedCues;
         existingRecord.updatedAt = Date.now();
 
-        // Update global index
         let index = result.yt_saved_video_index || {};
         index[cleanId] = {
           videoId: cleanId,
@@ -150,11 +148,7 @@ class StorageManager {
           [key]: existingRecord,
           yt_saved_video_index: index
         }, () => {
-          this.inMemoryCache.set(key, mergedCues);
-          console.log(`[StorageManager] Persisted cue: "${cueItem.text}" (Total stored: ${mergedCues.length})`);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('gemini_subtitles_updated', { detail: { count: mergedCues.length } }));
-          }
+          console.log(`[StorageManager] 💾 SAVED TO CHROME STORAGE: "${cueItem.text}" (${mergedCues.length} total saved)`);
           resolve();
         });
       });

@@ -1,7 +1,7 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
  * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * with robust auto-reconnection, Blob decoding, and live diagnostics reporting.
+ * with continuous streaming, robust reconnect, and instant sentence emission.
  */
 
 class GeminiTranscribeClient {
@@ -19,7 +19,7 @@ class GeminiTranscribeClient {
     this.onTranscriptChunk = config.onTranscriptChunk || null;
     this.onStatusChange = config.onStatusChange || null;
 
-    // Streaming state & diagnostics
+    // Streaming state
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
@@ -127,9 +127,6 @@ class GeminiTranscribeClient {
     }
   }
 
-  /**
-   * Sends the initial BidiGenerateContentSetup for transcription
-   */
   _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
@@ -147,9 +144,6 @@ class GeminiTranscribeClient {
     console.log('[GeminiTranscribe] Setup handshake sent for models/' + cleanModel);
   }
 
-  /**
-   * Streams a raw 16kHz 16-bit PCM audio frame to Live Transcribe
-   */
   sendAudioFrame(base64PCM, videoTimeSec) {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSetupComplete) {
       if (!this.isConnecting && !this.isConnected) {
@@ -184,9 +178,6 @@ class GeminiTranscribeClient {
     }
   }
 
-  /**
-   * Handles incoming WebSocket messages safely handling text, Blob, or ArrayBuffer
-   */
   async _handleServerMessage(event) {
     try {
       let rawText = '';
@@ -201,7 +192,6 @@ class GeminiTranscribeClient {
       if (!rawText) return;
       const data = JSON.parse(rawText);
 
-      // Check for setup completion
       if (data.setupComplete) {
         console.log('[GeminiTranscribe] Server confirmed setupComplete!');
         this._emitStatus('connected', 'Live ASR Ready');
@@ -229,8 +219,8 @@ class GeminiTranscribeClient {
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
               const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
-              const isTimeThreshold = durationMs >= 2600 && trimmed.length >= 10;
-              const isLengthThreshold = trimmed.length >= 45;
+              const isTimeThreshold = durationMs >= 2400 && trimmed.length >= 8;
+              const isLengthThreshold = trimmed.length >= 40;
 
               if (hasPunctuation || isTimeThreshold || isLengthThreshold) {
                 this._finalizeCurrentUtterance();
