@@ -1,11 +1,11 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
- * Connects to Google's gemini-3.5-live-translate-preview via v1alpha BidiGenerateContent
- * Matches official Google SDK LiveConnectConfig:
- * - translationConfig: { targetLanguageCode: 'sr' }
- * - inputAudioTranscription & outputAudioTranscription
- * - responseModalities: ['AUDIO']
- * - realtimeInput.audio schema
+ * Connects directly to gemini-3.5-live-translate-preview over v1alpha BidiGenerateContent.
+ * Uses exact Google Protobuf schema:
+ * - setup.generationConfig.translationConfig: { targetLanguageCode: 'sr' }
+ * - setup.generationConfig.responseModalities: ['AUDIO']
+ * - outputAudioTranscription: {}
+ * - Discards audio bytes, extracts real-time Serbian text subtitles
  */
 
 class GeminiLiveClient {
@@ -84,7 +84,7 @@ class GeminiLiveClient {
   }
 
   /**
-   * Establishes the WebSocket connection with v1alpha endpoint
+   * Establishes the WebSocket connection
    */
   connect() {
     if (!this.apiKey) {
@@ -105,10 +105,9 @@ class GeminiLiveClient {
     this.isConnecting = true;
     this.isSetupComplete = false;
     this.lastError = null;
-    this._emitStatus('connecting', 'Connecting to Live Translate WebSocket...');
+    this._emitStatus('connecting', 'Connecting to 3.5 Live Translate WebSocket...');
 
     const cleanModel = this.model.replace(/^models\//, '');
-    // Use v1alpha for gemini-3.5-live-translate-preview translationConfig support
     const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${this.apiKey}`;
 
     try {
@@ -120,7 +119,7 @@ class GeminiLiveClient {
         this.lastError = null;
         this._sendSetupHandshake(cleanModel);
         this._emitStatus('connected', `Live Translate (${cleanModel})`);
-        console.log('[GeminiLive] Connected to v1alpha Live Translate WebSocket:', cleanModel);
+        console.log('[GeminiLive] Connected to Live Translate WebSocket:', cleanModel);
       };
 
       this.ws.onmessage = async (event) => {
@@ -169,17 +168,17 @@ class GeminiLiveClient {
   _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    // Exact Google SDK LiveConnectConfig schema
+    // Verified Protobuf Schema: translationConfig inside generationConfig
     const setupPayload = {
       setup: {
         model: `models/${cleanModel}`,
         generationConfig: {
-          responseModalities: ['AUDIO']
+          responseModalities: ['AUDIO'],
+          temperature: 0.1,
+          translationConfig: {
+            targetLanguageCode: 'sr'
+          }
         },
-        translationConfig: {
-          targetLanguageCode: 'sr'
-        },
-        inputAudioTranscription: {},
         outputAudioTranscription: {}
       }
     };
@@ -187,7 +186,7 @@ class GeminiLiveClient {
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
     this.lastServerMessage = `Setup sent (model: models/${cleanModel}, target: sr)`;
-    console.log('[GeminiLive] Setup handshake sent with translationConfig for models/' + cleanModel, setupPayload);
+    console.log('[GeminiLive] Setup handshake sent for models/' + cleanModel, setupPayload);
   }
 
   sendAudioFrame(base64PCM, videoTimeSec) {
@@ -229,8 +228,8 @@ class GeminiLiveClient {
         rawText = event.data;
       } else if (event.data instanceof Blob) {
         rawText = await event.data.text();
-      } else if (event.data instanceof ArrayBuffer) {
-        rawText = new TextDecoder().decode(event.data);
+      } else if (typeof Buffer !== 'undefined' && Buffer.isBuffer(event.data)) {
+        rawText = Buffer.from(event.data).toString('utf8');
       }
 
       if (!rawText) return;
@@ -244,25 +243,23 @@ class GeminiLiveClient {
       }
 
       if (data.serverContent) {
-        // 1. Check for output transcription (Translated Serbian text)
-        if (data.serverContent.outputAudioTranscription) {
-          const outText = data.serverContent.outputAudioTranscription.text;
-          if (outText) {
-            this.currentUtterance = outText;
-            this.lastServerMessage = `Live SR: "${outText.trim()}"`;
-            if (this.onSubtitleChunk) {
-              this.onSubtitleChunk({
-                text: outText.trim(),
-                startMs: this.turnStartVideoTimeMs,
-                endMs: this.lastAudioVideoTimeMs + 1500,
-                isFinal: false
-              });
-            }
+        // 1. Check for outputTranscription (Direct Serbian text)
+        if (data.serverContent.outputTranscription?.text) {
+          const outText = data.serverContent.outputTranscription.text;
+          this.currentUtterance = outText;
+          this.lastServerMessage = `Live SR: "${outText.trim()}"`;
+          if (this.onSubtitleChunk) {
+            this.onSubtitleChunk({
+              text: outText.trim(),
+              startMs: this.turnStartVideoTimeMs,
+              endMs: this.lastAudioVideoTimeMs + 1500,
+              isFinal: false
+            });
           }
         }
 
         // 2. Check for interim translation streaming
-        if (data.serverContent.interimInputTranscription) {
+        if (data.serverContent.interimInputTranscription?.text) {
           const interimText = data.serverContent.interimInputTranscription.text;
           if (interimText && !this.currentUtterance) {
             this.currentUtterance = interimText;
@@ -277,20 +274,19 @@ class GeminiLiveClient {
           }
         }
 
-        // 3. Check for finalized input/output transcription
-        if (data.serverContent.inputTranscription) {
-          const finalText = data.serverContent.inputTranscription.text;
-          if (finalText && finalText.trim()) {
-            const cleanFinal = finalText.trim();
-            this.lastServerMessage = `Final: "${cleanFinal}"`;
-            this.totalWordsTranslated += cleanFinal.split(/\s+/).filter(Boolean).length;
+        // 3. Check for finalized input transcription
+        if (data.serverContent.inputTranscription?.text) {
+          const finalText = data.serverContent.inputTranscription.text.trim();
+          if (finalText) {
+            this.lastServerMessage = `Final: "${finalText}"`;
+            this.totalWordsTranslated += finalText.split(/\s+/).filter(Boolean).length;
 
             const startMs = this.turnStartVideoTimeMs;
             const endMs = Math.max(startMs + 1000, this.lastAudioVideoTimeMs);
 
             if (this.onSubtitleChunk) {
               this.onSubtitleChunk({
-                text: cleanFinal,
+                text: finalText,
                 startMs: startMs,
                 endMs: endMs,
                 isFinal: true
@@ -302,7 +298,7 @@ class GeminiLiveClient {
           }
         }
 
-        // 4. Check for model turn text parts (Serbian translation text accompanying audio)
+        // 4. Check for model turn text parts
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
@@ -341,7 +337,7 @@ class GeminiLiveClient {
         }
       }
     } catch (err) {
-      console.error('[GeminiLive] Error parsing server message:', err);
+      // ignore binary parse errors
     }
   }
 
