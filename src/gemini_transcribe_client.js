@@ -197,6 +197,7 @@ class GeminiTranscribeClient {
         this._emitStatus('connected', 'Live ASR Ready');
       }
 
+      // Check serverContent (Standard Live Multimodal API format)
       if (data.serverContent) {
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
