@@ -1,11 +1,13 @@
 /**
  * Subtitle Renderer for YouTube Subtitle Translator
- * Professional, Smooth, Stutter-Free Subtitle Rendering Engine.
- * Features:
- * - Anti-flicker Hold Buffer (ensures subtitles stay visible comfortably for >= 2.5s)
- * - Seamless in-place text updates without DOM recreation
- * - Dual Subtitle Support (English original + Serbian translation)
- * - Video playback synchronization with requestAnimationFrame
+ * Classical Closed Caption Engine (Netflix / Movie Style)
+ * 
+ * Key Principles:
+ * 1. Classical Captions: Text does NOT grow or stutter word-by-word. Subtitles appear only as complete,
+ *    ready-to-read sentences at the exact video timestamp.
+ * 2. Stable Display Window: Each sentence holds stably on screen for its full duration (>= 2.5s).
+ * 3. Smooth Transitions: Fluid opacity crossfades between sentences.
+ * 4. Dual Subtitle Support: Optional original English + Serbian translation.
  */
 
 class SubtitleRenderer {
@@ -18,11 +20,9 @@ class SubtitleRenderer {
     this.playerContainer = null;
 
     this.cues = []; // Sorted list of finalized { id, text, originalText, startMs, endMs }
-    this.liveCue = null; // Active live streaming cue
+    this.currentCueId = null;
     this.currentDisplayedText = '';
     this.currentDisplayedSecondary = '';
-    this.currentCueId = null;
-    this.lastActiveTimeMs = 0;
     this.rafId = null;
     this.isEnabled = true;
     this.showDualSubtitles = options.showDualSubtitles || false;
@@ -30,14 +30,14 @@ class SubtitleRenderer {
     this.styleSettings = {
       fontSize: options.fontSize || 22,
       fontColor: options.fontColor || '#ffffff',
-      backgroundColor: options.backgroundColor || 'rgba(8, 8, 8, 0.82)',
+      backgroundColor: options.backgroundColor || 'rgba(8, 8, 8, 0.85)',
       bottomOffset: options.bottomOffset || 12,
-      textShadow: options.textShadow || '0px 2px 4px rgba(0, 0, 0, 0.9)'
+      textShadow: options.textShadow || '0px 2px 4px rgba(0, 0, 0, 0.95)'
     };
   }
 
   /**
-   * Initializes overlay inside the YouTube player element safely
+   * Initializes overlay inside the YouTube player element
    */
   init(playerContainer, videoElement) {
     if (!playerContainer || !videoElement) return;
@@ -71,7 +71,7 @@ class SubtitleRenderer {
 
     this.statusElement = document.createElement('div');
     this.statusElement.className = 'gemini-yt-subtitle-status';
-    this.statusElement.title = 'Gemini Subtitles (Serbian)';
+    this.statusElement.title = 'Gemini Subtitles (Classical Mode)';
 
     this.secondaryTextElement = document.createElement('div');
     this.secondaryTextElement.className = 'gemini-yt-subtitle-original';
@@ -107,22 +107,8 @@ class SubtitleRenderer {
   }
 
   /**
-   * Sets temporary live streaming cue
-   */
-  setLiveCue(text, startMs, endMs) {
-    if (!text || !text.trim()) {
-      this.liveCue = null;
-      return;
-    }
-    this.liveCue = {
-      text: text.trim(),
-      startMs: startMs,
-      endMs: Math.max(endMs, startMs + 2400)
-    };
-  }
-
-  /**
-   * Adds a finalized subtitle cue with anti-flicker display window
+   * Adds a completed, classical sentence cue
+   * @param {Object} cue - { text: string, originalText?: string, startMs: number, endMs: number }
    */
   addCue(cue) {
     if (!cue || !cue.text) return;
@@ -130,22 +116,23 @@ class SubtitleRenderer {
     const cleanText = cue.text.trim();
     if (!cleanText) return;
 
-    // Minimum 2.4s display time so reader can absorb the sentence comfortably
-    const duration = Math.max(cue.endMs - cue.startMs, Math.max(2400, cleanText.split(/\s+/).length * 360));
+    // Minimum display duration (at least 2.5s or ~380ms per word) for comfortable reading
+    const wordCount = cleanText.split(/\s+/).length;
+    const minDuration = Math.max(2500, wordCount * 380);
+    const endMs = Math.max(cue.endMs, cue.startMs + minDuration);
 
     const newCue = {
-      id: `${cue.startMs}_${cue.startMs + duration}`,
+      id: `${cue.startMs}_${endMs}`,
       text: cleanText,
       originalText: (cue.originalText || '').trim(),
       startMs: cue.startMs,
-      endMs: cue.startMs + duration
+      endMs: endMs
     };
 
-    // Remove overlapping/duplicate cues
-    this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 600);
+    // Remove overlapping previous version of the same sentence
+    this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 800);
     this.cues.push(newCue);
     this.cues.sort((a, b) => a.startMs - b.startMs);
-    this.liveCue = null;
   }
 
   removeCue(cueId) {
@@ -167,7 +154,7 @@ class SubtitleRenderer {
     if (!this.statusElement) return;
     if (status === 'translating') {
       this.statusElement.classList.add('translating');
-      this.statusElement.textContent = '✨ Live Translating...';
+      this.statusElement.textContent = '✨ Translating in background...';
     } else if (status === 'error') {
       this.statusElement.classList.remove('translating');
       this.statusElement.classList.add('error');
@@ -191,18 +178,15 @@ class SubtitleRenderer {
     this.rafId = requestAnimationFrame(update);
   }
 
+  /**
+   * Classical Movie Caption Renderer:
+   * Only renders complete sentences when the video playback reaches their exact timestamp window.
+   */
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
-    // 1. Prioritize live streaming preview if actively receiving speech
-    if (this.liveCue && currentTimeMs >= this.liveCue.startMs - 300 && currentTimeMs <= this.liveCue.endMs + 1200) {
-      this._showText(this.liveCue.text, '', 'live');
-      return;
-    }
-
-    // 2. Search for active finalized cue with hold buffer
     const activeCue = this.cues.find(
-      c => currentTimeMs >= c.startMs - 200 && currentTimeMs <= c.endMs + 600
+      c => currentTimeMs >= c.startMs - 150 && currentTimeMs <= c.endMs + 300
     );
 
     if (activeCue) {
@@ -214,20 +198,22 @@ class SubtitleRenderer {
   }
 
   _showText(primaryText, secondaryText, cueId) {
-    if (this.currentDisplayedText !== primaryText) {
-      this.currentDisplayedText = primaryText;
-      this.textElement.textContent = primaryText;
+    if (this.currentCueId === cueId) {
+      // Already displaying this complete sentence steadily
+      return;
     }
+
+    this.currentCueId = cueId;
+    this.currentDisplayedText = primaryText;
+    this.textElement.textContent = primaryText;
 
     if (!this.textElement.classList.contains('visible')) {
       this.textElement.classList.add('visible');
     }
 
     if (secondaryText && this.secondaryTextElement) {
-      if (this.currentDisplayedSecondary !== secondaryText) {
-        this.currentDisplayedSecondary = secondaryText;
-        this.secondaryTextElement.textContent = secondaryText;
-      }
+      this.currentDisplayedSecondary = secondaryText;
+      this.secondaryTextElement.textContent = secondaryText;
       if (!this.secondaryTextElement.classList.contains('visible')) {
         this.secondaryTextElement.classList.add('visible');
       }
@@ -235,8 +221,6 @@ class SubtitleRenderer {
       this.secondaryTextElement.classList.remove('visible');
       this.currentDisplayedSecondary = '';
     }
-
-    this.currentCueId = cueId;
   }
 
   _hideSubtitles() {
@@ -265,7 +249,6 @@ class SubtitleRenderer {
 
   clear() {
     this.cues = [];
-    this.liveCue = null;
     this._hideSubtitles();
     this.setStatus('idle');
   }
@@ -277,7 +260,6 @@ class SubtitleRenderer {
     }
     this._cleanupDOMOnly();
     this.cues = [];
-    this.liveCue = null;
     this.currentCueId = null;
   }
 }

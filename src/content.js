@@ -234,7 +234,7 @@
   }
 
   /**
-   * Handles incoming subtitle chunks from gemini-3.5-live-translate-preview
+   * Handles incoming subtitle chunks from gemini-3.5-live-translate-preview (Classical Captions Mode)
    */
   async function handleSubtitleChunk(chunkData) {
     if (!config.enabled || !currentVideoId) return;
@@ -245,11 +245,10 @@
     const title = getVideoTitle();
 
     if (!chunkData.isFinal) {
-      // Live interim translated preview on player overlay
-      subtitleRenderer.setLiveCue(subtitleText, chunkData.startMs, chunkData.endMs);
+      // In Classical Captions mode, keep background telemetry updated while the sentence completes
       publishDiagnostics({ lastTranslated: subtitleText });
     } else {
-      // Finalized Serbian subtitle fragment
+      // Finalized, complete Serbian sentence ready to display as a classical caption
       const cue = {
         text: subtitleText,
         startMs: chunkData.startMs,
@@ -265,7 +264,7 @@
           lastTranslated: subtitleText,
           cuesSaved: subtitleRenderer.getCues().length
         });
-        console.log(`[GeminiSubtitles] 💾 Persisted Serbian subtitle: "${subtitleText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
+        console.log(`[GeminiSubtitles] 💾 Classical Subtitle: "${subtitleText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
       }
     }
   }
