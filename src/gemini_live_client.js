@@ -5,7 +5,7 @@
  * - setup.generationConfig.translationConfig: { targetLanguageCode: 'sr' }
  * - setup.generationConfig.responseModalities: ['AUDIO']
  * - outputAudioTranscription: {}
- * - Discards audio bytes, extracts real-time Serbian text subtitles
+ * - Smooth Utterance Accumulator: Assembles streaming translation tokens into complete sentences.
  */
 
 class GeminiLiveClient {
@@ -243,70 +243,48 @@ class GeminiLiveClient {
       }
 
       if (data.serverContent) {
-        // 1. Check for outputTranscription (Direct Serbian text)
+        // 1. Accumulate outputTranscription chunks (Direct Serbian streaming tokens)
         if (data.serverContent.outputTranscription?.text) {
           const outText = data.serverContent.outputTranscription.text;
-          this.currentUtterance = outText;
-          this.lastServerMessage = `Live SR: "${outText.trim()}"`;
+          
+          // Append seamlessly (handling spacing)
+          if (!this.currentUtterance || this.currentUtterance.endsWith(' ') || outText.startsWith(' ')) {
+            this.currentUtterance += outText;
+          } else {
+            this.currentUtterance += ' ' + outText;
+          }
+
+          this.lastServerMessage = `Live SR: "${this.currentUtterance.trim()}"`;
+
+          // Live visual update on subtitle overlay
           if (this.onSubtitleChunk) {
             this.onSubtitleChunk({
-              text: outText.trim(),
+              text: this.currentUtterance.trim(),
               startMs: this.turnStartVideoTimeMs,
               endMs: this.lastAudioVideoTimeMs + 1500,
               isFinal: false
             });
           }
-        }
 
-        // 2. Check for interim translation streaming
-        if (data.serverContent.interimInputTranscription?.text) {
-          const interimText = data.serverContent.interimInputTranscription.text;
-          if (interimText && !this.currentUtterance) {
-            this.currentUtterance = interimText;
-            if (this.onSubtitleChunk) {
-              this.onSubtitleChunk({
-                text: interimText.trim(),
-                startMs: this.turnStartVideoTimeMs,
-                endMs: this.lastAudioVideoTimeMs + 1500,
-                isFinal: false
-              });
-            }
+          // Check if a complete sentence is formed
+          const trimmed = this.currentUtterance.trim();
+          const hasPunctuation = /[.!?]$/.test(trimmed) && trimmed.length >= 6;
+          const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
+          const isLongPhrase = durationMs >= 3200 && trimmed.length >= 15;
+
+          if (hasPunctuation || isLongPhrase) {
+            this._finalizeCurrentUtterance();
           }
         }
 
-        // 3. Check for finalized input transcription
-        if (data.serverContent.inputTranscription?.text) {
-          const finalText = data.serverContent.inputTranscription.text.trim();
-          if (finalText) {
-            this.lastServerMessage = `Final: "${finalText}"`;
-            this.totalWordsTranslated += finalText.split(/\s+/).filter(Boolean).length;
-
-            const startMs = this.turnStartVideoTimeMs;
-            const endMs = Math.max(startMs + 1000, this.lastAudioVideoTimeMs);
-
-            if (this.onSubtitleChunk) {
-              this.onSubtitleChunk({
-                text: finalText,
-                startMs: startMs,
-                endMs: endMs,
-                isFinal: true
-              });
-            }
-
-            this.currentUtterance = '';
-            this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
-          }
-        }
-
-        // 4. Check for model turn text parts
+        // 2. ModelTurn text fallback
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
             if (part.text) {
-              this.currentUtterance += part.text;
-              this.totalWordsTranslated += part.text.split(/\s+/).filter(Boolean).length;
-              this.lastServerMessage = `Serbian: "${this.currentUtterance.trim()}"`;
-
+              if (!this.currentUtterance.includes(part.text)) {
+                this.currentUtterance += ' ' + part.text;
+              }
               if (this.onSubtitleChunk) {
                 this.onSubtitleChunk({
                   text: this.currentUtterance.trim(),
@@ -314,15 +292,6 @@ class GeminiLiveClient {
                   endMs: this.lastAudioVideoTimeMs + 1500,
                   isFinal: false
                 });
-              }
-
-              const trimmed = this.currentUtterance.trim();
-              const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
-              const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 5;
-              const isTimeThreshold = durationMs >= 2400 && trimmed.length >= 8;
-
-              if (hasPunctuation || isTimeThreshold) {
-                this._finalizeCurrentUtterance();
               }
             }
           }
@@ -346,6 +315,9 @@ class GeminiLiveClient {
     if (finalText && finalText !== '[EMPTY]') {
       const startMs = this.turnStartVideoTimeMs;
       const endMs = Math.max(startMs + 1000, this.lastAudioVideoTimeMs);
+
+      this.totalWordsTranslated += finalText.split(/\s+/).filter(Boolean).length;
+      this.lastServerMessage = `Final: "${finalText}"`;
 
       if (this.onSubtitleChunk) {
         this.onSubtitleChunk({
