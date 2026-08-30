@@ -1,8 +1,8 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator
- * Two-Stage Live Pipeline:
- * Stage 1: gemini-3.5-transcribe-live (Google Live WebSocket ASR - 0 REST quota)
- * Stage 2: GeminiTextTranslator (Fast, grammatically accurate Serbian translation with quota fallback)
+ * 100% Modern Gemini 3.x Live WebSocket Pipeline:
+ * Stage 1: gemini-3.5-transcribe-live (WebSocket Speech-to-Text - 0 REST quota)
+ * Stage 2: gemini-3.1-flash-live-preview (WebSocket Live Text Translator - 0 REST quota, audio discarded)
  */
 
 (function () {
@@ -12,7 +12,7 @@
   let vadProcessor = null;
   let audioCapture = null;
   let transcribeClient = null;
-  let textTranslator = null;
+  let liveTextTranslator = null;
   let storageManager = null;
   let subtitleRenderer = null;
   let isInitialized = false;
@@ -20,7 +20,7 @@
   // Real-time telemetry state
   const diagnostics = {
     videoId: null,
-    mode: 'Two-Stage Live Pipeline (Transcribe + Serbian Translate)',
+    mode: '100% WebSocket: 3.5 Transcribe Live + 3.1 Flash Live',
     status: 'Initializing...',
     audioLevel: 0,
     framesSent: 0,
@@ -37,7 +37,7 @@
     enabled: true,
     apiKey: '',
     transcribeModel: 'gemini-3.5-transcribe-live',
-    translateModel: 'gemini-3.1-flash-lite',
+    liveTranslateModel: 'gemini-3.1-flash-live-preview',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
     showDualSubtitles: false,
@@ -107,15 +107,15 @@
     });
     subtitleRenderer.setEnabled(config.enabled);
 
-    // 3. Initialize Stage 2 Text Translator
-    textTranslator = new GeminiTextTranslator({
+    // 3. Initialize Stage 2 Live Text Translator (gemini-3.1-flash-live-preview over WebSocket)
+    liveTextTranslator = new GeminiLiveTextTranslator({
       apiKey: config.apiKey,
-      model: config.translateModel,
+      model: config.liveTranslateModel,
       scriptType: config.scriptType,
       speakerGender: config.speakerGender
     });
 
-    // 4. Initialize Stage 1 Live Transcribe Client (WebSocket Speech-to-Text)
+    // 4. Initialize Stage 1 Live Transcribe Client (gemini-3.5-transcribe-live over WebSocket)
     transcribeClient = new GeminiTranscribeClient({
       apiKey: config.apiKey,
       model: config.transcribeModel,
@@ -157,7 +157,7 @@
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Two-Stage Pipeline Initialized: Transcribe (' + config.transcribeModel + ') + Translate (' + config.translateModel + ')');
+    console.log('[GeminiSubtitles] 100% WebSocket Pipeline Initialized: Transcribe (' + config.transcribeModel + ') + Live Translate (' + config.liveTranslateModel + ')');
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -175,10 +175,10 @@
           });
         }
 
-        if (textTranslator) {
-          textTranslator.updateConfig({
+        if (liveTextTranslator) {
+          liveTextTranslator.updateConfig({
             apiKey: config.apiKey,
-            model: config.translateModel,
+            model: config.liveTranslateModel,
             scriptType: config.scriptType,
             speakerGender: config.speakerGender
           });
@@ -269,16 +269,16 @@
       subtitleRenderer.setLiveCue(transcriptText, chunkData.startMs, chunkData.endMs);
       publishDiagnostics({ lastTranscribed: transcriptText });
     } else {
-      // 2. Finalized sentence from Stage 1: Send to Stage 2 Text Translator
+      // 2. Finalized sentence: Send to Stage 2 Flash Live WebSocket Text Translator
       const englishText = transcriptText;
 
       publishDiagnostics({
-        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        status: `Live Translating: "${englishText.substring(0, 30)}..."`,
         lastTranscribed: englishText
       });
 
-      // Translate clean transcript into natural Serbian via Flash Lite (~60ms)
-      const serbianText = await textTranslator.translateText(englishText);
+      // Translate in real time over Flash Live WebSocket (0 REST calls)
+      const serbianText = await liveTextTranslator.translateText(englishText);
       const displayText = serbianText || englishText;
 
       const cue = {
@@ -293,7 +293,7 @@
       if (storageManager) {
         await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
         publishDiagnostics({
-          status: 'Fragment translated & saved!',
+          status: 'Subtitles live translated & saved!',
           lastTranscribed: englishText,
           lastTranslated: displayText,
           cuesSaved: subtitleRenderer.getCues().length
@@ -315,6 +315,7 @@
     if (!videoId) {
       if (audioCapture) audioCapture.detach();
       if (transcribeClient) transcribeClient.disconnect();
+      if (liveTextTranslator) liveTextTranslator.disconnect();
       if (subtitleRenderer) subtitleRenderer.clear();
       currentVideoId = null;
       publishDiagnostics({ status: 'Not on a YouTube video page' });
@@ -335,6 +336,9 @@
         if (transcribeClient) {
           transcribeClient.resetStream();
           transcribeClient.connect();
+        }
+        if (liveTextTranslator) {
+          liveTextTranslator.connect();
         }
       }
 
