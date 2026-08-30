@@ -1,7 +1,7 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
  * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * with transparent telemetry and error logging.
+ * Supports interimInputTranscription and inputTranscription payloads from Google Live ASR.
  */
 
 class GeminiTranscribeClient {
@@ -215,8 +215,6 @@ class GeminiTranscribeClient {
       }
 
       if (!rawText) return;
-      this.lastServerMessage = rawText.length > 80 ? rawText.substring(0, 80) + '...' : rawText;
-
       const data = JSON.parse(rawText);
 
       if (data.setupComplete) {
@@ -225,15 +223,57 @@ class GeminiTranscribeClient {
       }
 
       if (data.serverContent) {
-        const modelTurn = data.serverContent.modelTurn;
-        if (modelTurn && Array.isArray(modelTurn.parts)) {
-          for (const part of modelTurn.parts) {
+        // 1. Handle live interim transcription (real-time words while speaking)
+        if (data.serverContent.interimInputTranscription) {
+          const interimText = data.serverContent.interimInputTranscription.text;
+          if (interimText) {
+            this.currentUtterance = interimText;
+            this.lastServerMessage = `Live: "${interimText.trim()}"`;
+
+            if (this.onTranscriptChunk) {
+              this.onTranscriptChunk({
+                text: interimText.trim(),
+                startMs: this.turnStartVideoTimeMs,
+                endMs: this.lastAudioVideoTimeMs + 1500,
+                isFinal: false
+              });
+            }
+          }
+        }
+
+        // 2. Handle finalized input transcription (completed phrase/sentence from Google)
+        if (data.serverContent.inputTranscription) {
+          const finalText = data.serverContent.inputTranscription.text;
+          if (finalText && finalText.trim()) {
+            const cleanFinal = finalText.trim();
+            this.lastServerMessage = `Final: "${cleanFinal}"`;
+            this.totalWordsTranscribed += cleanFinal.split(/\s+/).filter(Boolean).length;
+
+            const startMs = this.turnStartVideoTimeMs;
+            const endMs = Math.max(startMs + 1000, this.lastAudioVideoTimeMs);
+
+            if (this.onTranscriptChunk) {
+              this.onTranscriptChunk({
+                text: cleanFinal,
+                startMs: startMs,
+                endMs: endMs,
+                isFinal: true
+              });
+            }
+
+            this.currentUtterance = '';
+            this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
+          }
+        }
+
+        // 3. Handle model turn parts (if modelTurn is returned)
+        if (data.serverContent.modelTurn && Array.isArray(data.serverContent.modelTurn.parts)) {
+          for (const part of data.serverContent.modelTurn.parts) {
             if (part.text) {
               this.currentUtterance += part.text;
               this.totalWordsTranscribed += part.text.split(/\s+/).filter(Boolean).length;
               this.lastServerMessage = `Text: "${part.text.trim()}"`;
 
-              // 1. Emit live transcription preview
               if (this.onTranscriptChunk) {
                 this.onTranscriptChunk({
                   text: this.currentUtterance.trim(),
@@ -243,14 +283,12 @@ class GeminiTranscribeClient {
                 });
               }
 
-              // 2. Auto-finalize condition
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
               const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
               const isTimeThreshold = durationMs >= 2400 && trimmed.length >= 8;
-              const isLengthThreshold = trimmed.length >= 40;
 
-              if (hasPunctuation || isTimeThreshold || isLengthThreshold) {
+              if (hasPunctuation || isTimeThreshold) {
                 this._finalizeCurrentUtterance();
               }
             }
