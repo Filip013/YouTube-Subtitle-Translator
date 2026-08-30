@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const translateModelIdInput = document.getElementById('translate-model-id');
 
   const scriptTypeRadios = document.querySelectorAll('input[name="scriptType"]');
-  const speakerGenderSelect = document.getElementById('speaker-gender');
+  const speakerGenderSelect = document.getElementById('speaker-gender-select') || document.getElementById('speaker-gender');
 
   const vadSensitivitySelect = document.getElementById('vad-sensitivity');
   const sliderSilence = document.getElementById('slider-silence');

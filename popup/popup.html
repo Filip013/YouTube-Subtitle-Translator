@@ -56,7 +56,7 @@
         </div>
       </div>
 
-      <!-- Video Memory Status with Quick Clear Action -->
+      <!-- Video Memory Status with Quick Copy & Clear Actions -->
       <div id="video-memory-card" class="memory-card">
         <div class="memory-info flex-between">
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -66,9 +66,14 @@
               <div id="memory-subtitle-count" class="memory-desc">Checking video...</div>
             </div>
           </div>
-          <button type="button" id="btn-clear-current-video" class="btn-clear-video hidden" title="Clear subtitles for this video">
-            🗑️ Clear
-          </button>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" id="btn-copy-saved-cues" class="btn-secondary hidden" style="padding: 3px 8px; font-size: 11px; height: auto;" title="Copy all saved captions for this video">
+              📜 Copy Captions
+            </button>
+            <button type="button" id="btn-clear-current-video" class="btn-clear-video hidden" title="Clear subtitles for this video">
+              🗑️ Clear
+            </button>
+          </div>
         </div>
       </div>
 

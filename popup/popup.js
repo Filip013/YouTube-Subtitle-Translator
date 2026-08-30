@@ -1,6 +1,6 @@
 /**
  * Popup Script for YouTube Subtitle Translator
- * Live Telemetry Controller & One-Click Copy Log
+ * Live Telemetry Controller, One-Click Copy Log & Copy Saved Captions
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testResultBox = document.getElementById('test-result-box');
   const memoryDesc = document.getElementById('memory-subtitle-count');
   const btnClearCurrentVideo = document.getElementById('btn-clear-current-video');
+  const btnCopySavedCues = document.getElementById('btn-copy-saved-cues');
   const liveDebugLog = document.getElementById('live-debug-log');
   const btnCopyLog = document.getElementById('btn-copy-log');
 
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentScriptType = 'latin';
   let currentSpeakerGender = 'auto';
   let activeVideoId = null;
+  let cachedCues = [];
 
   const defaultSettings = {
     enabled: true,
@@ -38,7 +40,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentScriptType = items.scriptType || 'latin';
     currentSpeakerGender = items.speakerGender || 'auto';
 
-    // Script buttons
     segmentBtns.forEach(btn => {
       if (btn.dataset.script === items.scriptType) {
         btn.classList.add('active');
@@ -47,7 +48,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
-    // Gender buttons
     genderBtns.forEach(btn => {
       if (btn.dataset.gender === items.speakerGender) {
         btn.classList.add('active');
@@ -89,6 +89,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // One-Click Copy Saved Captions Timeline Button
+  if (btnCopySavedCues) {
+    btnCopySavedCues.addEventListener('click', async () => {
+      if (!cachedCues || cachedCues.length === 0) return;
+
+      let formattedOutput = `=== SAVED CAPTIONS TIMELINE (Video ID: ${activeVideoId}) ===\n\n`;
+      cachedCues.forEach((c, idx) => {
+        const start = formatTime(c.startMs);
+        const end = formatTime(c.endMs);
+        formattedOutput += `[${start} -> ${end}] ${c.text}\n`;
+      });
+
+      try {
+        await navigator.clipboard.writeText(formattedOutput);
+        const originalText = btnCopySavedCues.textContent;
+        btnCopySavedCues.textContent = '✅ Copied!';
+        btnCopySavedCues.style.borderColor = '#34a853';
+        btnCopySavedCues.style.color = '#34a853';
+        setTimeout(() => {
+          btnCopySavedCues.textContent = originalText;
+          btnCopySavedCues.style.borderColor = '';
+          btnCopySavedCues.style.color = '';
+        }, 1500);
+      } catch (err) {
+        console.error('Failed to copy saved captions:', err);
+      }
+    });
+  }
+
   // Continuously refresh live telemetry while popup is open
   async function refreshLiveTelemetry() {
     if (!chrome.tabs || !chrome.tabs.query) return;
@@ -97,13 +126,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (tabs && tabs[0] && tabs[0].url) {
         activeVideoId = StorageManager.extractVideoId(tabs[0].url);
         if (activeVideoId) {
-          const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
-          if (cues && cues.length > 0) {
-            memoryDesc.textContent = `✨ ${cues.length} Serbian subtitles remembered`;
+          cachedCues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
+          if (cachedCues && cachedCues.length > 0) {
+            memoryDesc.textContent = `✨ ${cachedCues.length} Serbian subtitles remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
+            btnCopySavedCues.classList.remove('hidden');
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
             btnClearCurrentVideo.classList.add('hidden');
+            btnCopySavedCues.classList.add('hidden');
           }
 
           // Fetch real-time telemetry from content script
@@ -114,7 +145,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               logText += `[Mode] ${diag.mode || 'Live Translate'}\n`;
               logText += `[Status] ${diag.status || 'Active'}\n`;
               logText += `[PCM Frames] ${diag.framesSent || 0} sent\n`;
-              logText += `[Saved in Storage] ${cues.length} subtitles\n`;
+              logText += `[Saved in Storage] ${cachedCues.length} subtitles\n`;
 
               if (diag.wsInfo) {
                 logText += `[WebSocket] ${diag.wsInfo.wsState} (Model: ${diag.wsInfo.model})\n`;
@@ -132,7 +163,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               }
               liveDebugLog.textContent = logText;
             } else {
-              liveDebugLog.textContent = `[Video ID] ${activeVideoId}\nStored Subtitles: ${cues.length}\nPlay the video to stream audio.`;
+              liveDebugLog.textContent = `[Video ID] ${activeVideoId}\nStored Subtitles: ${cachedCues.length}\nPlay the video to stream audio.`;
             }
           });
           return;
@@ -142,11 +173,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       activeVideoId = null;
       memoryDesc.textContent = 'Ready on YouTube video pages';
       btnClearCurrentVideo.classList.add('hidden');
+      btnCopySavedCues.classList.add('hidden');
       liveDebugLog.textContent = 'Open any YouTube video to start monitoring.';
     });
   }
 
-  // Refresh every 800ms while popup is open
   const pollInterval = setInterval(refreshLiveTelemetry, 800);
   window.addEventListener('unload', () => clearInterval(pollInterval));
 
@@ -254,5 +285,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function hideFeedback() {
     testResultBox.classList.add('hidden');
+  }
+
+  function formatTime(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    const millis = Math.floor((ms % 1000) / 100);
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${millis}`;
   }
 });
