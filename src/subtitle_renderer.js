@@ -1,7 +1,11 @@
 /**
  * Subtitle Renderer for YouTube Subtitle Translator
- * Creates, updates, and synchronizes the custom subtitle overlay on YouTube's player.
- * Supports Dual Subtitles (Original English + Translated Serbian) and persistent rendering.
+ * Professional, Smooth, Stutter-Free Subtitle Rendering Engine.
+ * Features:
+ * - Anti-flicker Hold Buffer (ensures subtitles stay visible comfortably for >= 2.5s)
+ * - Seamless in-place text updates without DOM recreation
+ * - Dual Subtitle Support (English original + Serbian translation)
+ * - Video playback synchronization with requestAnimationFrame
  */
 
 class SubtitleRenderer {
@@ -14,8 +18,11 @@ class SubtitleRenderer {
     this.playerContainer = null;
 
     this.cues = []; // Sorted list of finalized { id, text, originalText, startMs, endMs }
-    this.liveCue = null; // Temporary active streaming cue
-    this.currentCue = null;
+    this.liveCue = null; // Active live streaming cue
+    this.currentDisplayedText = '';
+    this.currentDisplayedSecondary = '';
+    this.currentCueId = null;
+    this.lastActiveTimeMs = 0;
     this.rafId = null;
     this.isEnabled = true;
     this.showDualSubtitles = options.showDualSubtitles || false;
@@ -23,19 +30,18 @@ class SubtitleRenderer {
     this.styleSettings = {
       fontSize: options.fontSize || 22,
       fontColor: options.fontColor || '#ffffff',
-      backgroundColor: options.backgroundColor || 'rgba(0, 0, 0, 0.78)',
+      backgroundColor: options.backgroundColor || 'rgba(8, 8, 8, 0.82)',
       bottomOffset: options.bottomOffset || 12,
-      textShadow: options.textShadow || '0px 2px 4px rgba(0, 0, 0, 0.8)'
+      textShadow: options.textShadow || '0px 2px 4px rgba(0, 0, 0, 0.9)'
     };
   }
 
   /**
-   * Initializes overlay inside the YouTube player element safely without destroying existing state
+   * Initializes overlay inside the YouTube player element safely
    */
   init(playerContainer, videoElement) {
     if (!playerContainer || !videoElement) return;
 
-    // If already attached to this container and video, do NOT destroy or reset
     if (this.playerContainer === playerContainer && this.videoElement === videoElement && this.container && this.container.isConnected) {
       return;
     }
@@ -81,9 +87,6 @@ class SubtitleRenderer {
     this.applyStyles(this.styleSettings);
   }
 
-  /**
-   * Updates style settings dynamically
-   */
   applyStyles(settings = {}) {
     this.styleSettings = { ...this.styleSettings, ...settings };
     if (settings.showDualSubtitles !== undefined) {
@@ -104,83 +107,67 @@ class SubtitleRenderer {
   }
 
   /**
-   * Sets temporary live streaming cue (displayed during speech transcription)
+   * Sets temporary live streaming cue
    */
   setLiveCue(text, startMs, endMs) {
-    if (!text) {
+    if (!text || !text.trim()) {
       this.liveCue = null;
       return;
     }
     this.liveCue = {
-      text: text,
+      text: text.trim(),
       startMs: startMs,
-      endMs: endMs
+      endMs: Math.max(endMs, startMs + 2400)
     };
   }
 
   /**
-   * Adds or updates a finalized translated subtitle cue
-   * @param {Object} cue - { text: string, originalText?: string, startMs: number, endMs: number }
+   * Adds a finalized subtitle cue with anti-flicker display window
    */
   addCue(cue) {
     if (!cue || !cue.text) return;
 
+    const cleanText = cue.text.trim();
+    if (!cleanText) return;
+
+    // Minimum 2.4s display time so reader can absorb the sentence comfortably
+    const duration = Math.max(cue.endMs - cue.startMs, Math.max(2400, cleanText.split(/\s+/).length * 360));
+
     const newCue = {
-      id: `${cue.startMs}_${cue.endMs}`,
-      text: cue.text,
-      originalText: cue.originalText || '',
+      id: `${cue.startMs}_${cue.startMs + duration}`,
+      text: cleanText,
+      originalText: (cue.originalText || '').trim(),
       startMs: cue.startMs,
-      endMs: cue.endMs
+      endMs: cue.startMs + duration
     };
 
-    this.cues = this.cues.filter(c => c.id !== newCue.id);
+    // Remove overlapping/duplicate cues
+    this.cues = this.cues.filter(c => Math.abs(c.startMs - newCue.startMs) > 600);
     this.cues.push(newCue);
     this.cues.sort((a, b) => a.startMs - b.startMs);
     this.liveCue = null;
   }
 
-  /**
-   * Removes a specific cue by ID
-   */
   removeCue(cueId) {
     this.cues = this.cues.filter(c => c.id !== cueId);
-    if (this.currentCue && this.currentCue.id === cueId) {
-      this.currentCue = null;
-      if (this.textElement) {
-        this.textElement.textContent = '';
-        this.textElement.classList.remove('visible');
-      }
-      if (this.secondaryTextElement) {
-        this.secondaryTextElement.textContent = '';
-        this.secondaryTextElement.classList.remove('visible');
-      }
+    if (this.currentCueId === cueId) {
+      this._hideSubtitles();
     }
   }
 
-  /**
-   * Checks if a finalized subtitle cue already covers the given timestamp
-   * @param {number} currentTimeMs 
-   * @returns {boolean}
-   */
   hasCueAtTime(currentTimeMs) {
     return this.cues.some(c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs);
   }
 
-  /**
-   * Returns current list of cues
-   */
   getCues() {
     return [...this.cues];
   }
 
-  /**
-   * Sets the translating status indicator
-   */
   setStatus(status) {
     if (!this.statusElement) return;
     if (status === 'translating') {
       this.statusElement.classList.add('translating');
-      this.statusElement.textContent = '✨ Translating...';
+      this.statusElement.textContent = '✨ Live Translating...';
     } else if (status === 'error') {
       this.statusElement.classList.remove('translating');
       this.statusElement.classList.add('error');
@@ -195,7 +182,7 @@ class SubtitleRenderer {
     if (this.rafId) return;
 
     const update = () => {
-      if (this.isEnabled && this.videoElement && !this.videoElement.paused) {
+      if (this.isEnabled && this.videoElement) {
         const currentTimeMs = this.videoElement.currentTime * 1000;
         this._renderAtTime(currentTimeMs);
       }
@@ -207,44 +194,61 @@ class SubtitleRenderer {
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
-    // 1. Check if we have an active live streaming transcription preview
-    if (this.liveCue && currentTimeMs >= this.liveCue.startMs - 500 && currentTimeMs <= this.liveCue.endMs + 1000) {
-      this.textElement.textContent = this.liveCue.text;
-      this.textElement.classList.add('visible');
-      if (this.secondaryTextElement) {
-        this.secondaryTextElement.classList.remove('visible');
-      }
+    // 1. Prioritize live streaming preview if actively receiving speech
+    if (this.liveCue && currentTimeMs >= this.liveCue.startMs - 300 && currentTimeMs <= this.liveCue.endMs + 1200) {
+      this._showText(this.liveCue.text, '', 'live');
       return;
     }
 
-    // 2. Otherwise render finalized cues
+    // 2. Search for active finalized cue with hold buffer
     const activeCue = this.cues.find(
-      c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs + 300
+      c => currentTimeMs >= c.startMs - 200 && currentTimeMs <= c.endMs + 600
     );
 
     if (activeCue) {
-      if (this.currentCue !== activeCue) {
-        this.currentCue = activeCue;
-        this.textElement.textContent = activeCue.text;
-        this.textElement.classList.add('visible');
-
-        // Render Dual Subtitles if originalText exists and enabled
-        if (this.showDualSubtitles && activeCue.originalText && this.secondaryTextElement) {
-          this.secondaryTextElement.textContent = activeCue.originalText;
-          this.secondaryTextElement.classList.add('visible');
-        } else if (this.secondaryTextElement) {
-          this.secondaryTextElement.classList.remove('visible');
-        }
-      }
+      const secondary = (this.showDualSubtitles && activeCue.originalText) ? activeCue.originalText : '';
+      this._showText(activeCue.text, secondary, activeCue.id);
     } else {
-      if (this.currentCue !== null) {
-        this.currentCue = null;
-        this.textElement.textContent = '';
+      this._hideSubtitles();
+    }
+  }
+
+  _showText(primaryText, secondaryText, cueId) {
+    if (this.currentDisplayedText !== primaryText) {
+      this.currentDisplayedText = primaryText;
+      this.textElement.textContent = primaryText;
+    }
+
+    if (!this.textElement.classList.contains('visible')) {
+      this.textElement.classList.add('visible');
+    }
+
+    if (secondaryText && this.secondaryTextElement) {
+      if (this.currentDisplayedSecondary !== secondaryText) {
+        this.currentDisplayedSecondary = secondaryText;
+        this.secondaryTextElement.textContent = secondaryText;
+      }
+      if (!this.secondaryTextElement.classList.contains('visible')) {
+        this.secondaryTextElement.classList.add('visible');
+      }
+    } else if (this.secondaryTextElement) {
+      this.secondaryTextElement.classList.remove('visible');
+      this.currentDisplayedSecondary = '';
+    }
+
+    this.currentCueId = cueId;
+  }
+
+  _hideSubtitles() {
+    if (this.currentCueId !== null) {
+      this.currentCueId = null;
+      this.currentDisplayedText = '';
+      this.currentDisplayedSecondary = '';
+      if (this.textElement) {
         this.textElement.classList.remove('visible');
-        if (this.secondaryTextElement) {
-          this.secondaryTextElement.textContent = '';
-          this.secondaryTextElement.classList.remove('visible');
-        }
+      }
+      if (this.secondaryTextElement) {
+        this.secondaryTextElement.classList.remove('visible');
       }
     }
   }
@@ -262,15 +266,7 @@ class SubtitleRenderer {
   clear() {
     this.cues = [];
     this.liveCue = null;
-    this.currentCue = null;
-    if (this.textElement) {
-      this.textElement.textContent = '';
-      this.textElement.classList.remove('visible');
-    }
-    if (this.secondaryTextElement) {
-      this.secondaryTextElement.textContent = '';
-      this.secondaryTextElement.classList.remove('visible');
-    }
+    this._hideSubtitles();
     this.setStatus('idle');
   }
 
@@ -282,7 +278,7 @@ class SubtitleRenderer {
     this._cleanupDOMOnly();
     this.cues = [];
     this.liveCue = null;
-    this.currentCue = null;
+    this.currentCueId = null;
   }
 }
 

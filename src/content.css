@@ -1,4 +1,4 @@
-/* YouTube Gemini Subtitle Translator Styles */
+/* YouTube Gemini Subtitle Translator Styles - Smooth & Stutter-Free */
 
 .gemini-yt-subtitle-container {
   position: absolute;
@@ -12,20 +12,20 @@
   justify-content: center;
   pointer-events: none;
   z-index: 60;
-  transition: bottom 0.2s ease;
+  transition: bottom 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
   box-sizing: border-box;
-  padding: 0 20px;
-  gap: 4px;
+  padding: 0 24px;
+  gap: 6px;
 }
 
-/* Move up when YouTube player controls are visible on hover */
+/* Elevate when YouTube native controls appear */
 .ytp-autohide:not(.ytp-fullscreen) ~ .gemini-yt-subtitle-container,
 .html5-video-player:not(.ytp-autohide) .gemini-yt-subtitle-container {
   bottom: 16%;
 }
 
-/* Fullscreen adjustments */
+/* Fullscreen positioning */
 .ytp-fullscreen .gemini-yt-subtitle-container {
   bottom: 10%;
 }
@@ -33,27 +33,27 @@
   bottom: 15%;
 }
 
-/* Original English text (Dual Subtitle mode) */
+/* Original English text (Dual Subtitle Mode) */
 .gemini-yt-subtitle-original {
   display: inline-block;
   padding: 3px 12px;
   border-radius: 4px;
   color: #cbd5e1;
-  background-color: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(4px);
-  font-family: "YouTube Noto", Roboto, "Segoe UI", Arial, sans-serif;
+  background-color: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  font-family: "YouTube Noto", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   font-size: 15px;
   font-weight: 500;
   text-align: center;
-  line-height: 1.3;
+  line-height: 1.35;
   max-width: 85%;
   white-space: pre-wrap;
   word-wrap: break-word;
   opacity: 0;
   transform: translateY(2px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   text-shadow: 0px 1px 3px rgba(0, 0, 0, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .gemini-yt-subtitle-original.visible {
@@ -61,26 +61,29 @@
   transform: translateY(0);
 }
 
-/* Primary translated Serbian subtitle text box */
+/* Primary translated Serbian subtitle badge */
 .gemini-yt-subtitle-text {
   display: inline-block;
-  padding: 6px 16px;
+  padding: 6px 18px;
   border-radius: 6px;
   color: #ffffff;
-  background-color: rgba(0, 0, 0, 0.78);
-  font-family: "YouTube Noto", Roboto, "Segoe UI", Arial, sans-serif;
+  background-color: rgba(6, 6, 8, 0.85);
+  backdrop-filter: blur(10px);
+  font-family: "YouTube Noto", Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   font-size: 22px;
   font-weight: 600;
+  letter-spacing: 0.2px;
   text-align: center;
   line-height: 1.4;
-  max-width: 85%;
+  max-width: 82%;
   white-space: pre-wrap;
   word-wrap: break-word;
   opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.85);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  transform: translateY(3px);
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.95);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .gemini-yt-subtitle-text.visible {
@@ -88,26 +91,26 @@
   transform: translateY(0);
 }
 
-/* Translating / Status badge */
+/* Subtle Live Status Indicator */
 .gemini-yt-subtitle-status {
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.3px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
   margin-bottom: 2px;
-  color: #a8c7fa;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(4px);
-  padding: 2px 8px;
+  color: #8ab4f8;
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(6px);
+  padding: 2px 10px;
   border-radius: 12px;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   opacity: 0;
   transition: opacity 0.25s ease;
-  border: 1px solid rgba(168, 199, 250, 0.2);
+  border: 1px solid rgba(138, 180, 248, 0.25);
 }
 
 .gemini-yt-subtitle-status.translating {
   opacity: 1;
-  animation: gemini-glow-pulse 1.8s infinite ease-in-out;
+  animation: gemini-glow-pulse 2s infinite ease-in-out;
 }
 
 .gemini-yt-subtitle-status.error {
@@ -119,16 +122,16 @@
 
 @keyframes gemini-glow-pulse {
   0% {
-    opacity: 0.6;
+    opacity: 0.7;
     transform: scale(0.98);
   }
   50% {
     opacity: 1;
-    transform: scale(1.02);
-    box-shadow: 0 0 12px rgba(168, 199, 250, 0.4);
+    transform: scale(1.01);
+    box-shadow: 0 0 10px rgba(138, 180, 248, 0.35);
   }
   100% {
-    opacity: 0.6;
+    opacity: 0.7;
     transform: scale(0.98);
   }
 }
