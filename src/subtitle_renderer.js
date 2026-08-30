@@ -1,21 +1,24 @@
 /**
  * Subtitle Renderer for YouTube Subtitle Translator
  * Creates, updates, and synchronizes the custom subtitle overlay on YouTube's player.
+ * Supports Dual Subtitles (Original English + Translated Serbian) and custom styling.
  */
 
 class SubtitleRenderer {
   constructor(options = {}) {
     this.container = null;
     this.textElement = null;
+    this.secondaryTextElement = null; // For Dual Subtitles (Original text)
     this.statusElement = null;
     this.videoElement = null;
     this.playerContainer = null;
 
-    this.cues = []; // Sorted list of finalized { id, text, startMs, endMs }
+    this.cues = []; // Sorted list of finalized { id, text, originalText, startMs, endMs }
     this.liveCue = null; // Temporary active streaming cue
     this.currentCue = null;
     this.rafId = null;
     this.isEnabled = true;
+    this.showDualSubtitles = options.showDualSubtitles || false;
 
     this.styleSettings = {
       fontSize: options.fontSize || 22,
@@ -51,10 +54,16 @@ class SubtitleRenderer {
     this.statusElement.className = 'gemini-yt-subtitle-status';
     this.statusElement.title = 'Gemini Subtitles (Serbian)';
 
+    // Secondary original transcript element (Dual Subtitles)
+    this.secondaryTextElement = document.createElement('div');
+    this.secondaryTextElement.className = 'gemini-yt-subtitle-original';
+
+    // Primary Serbian translation element
     this.textElement = document.createElement('div');
     this.textElement.className = 'gemini-yt-subtitle-text';
 
     this.container.appendChild(this.statusElement);
+    this.container.appendChild(this.secondaryTextElement);
     this.container.appendChild(this.textElement);
 
     this.playerContainer.appendChild(this.container);
@@ -66,6 +75,10 @@ class SubtitleRenderer {
    */
   applyStyles(settings = {}) {
     this.styleSettings = { ...this.styleSettings, ...settings };
+    if (settings.showDualSubtitles !== undefined) {
+      this.showDualSubtitles = settings.showDualSubtitles;
+    }
+
     if (!this.container || !this.textElement) return;
 
     this.container.style.bottom = `${this.styleSettings.bottomOffset}%`;
@@ -73,10 +86,14 @@ class SubtitleRenderer {
     this.textElement.style.color = this.styleSettings.fontColor;
     this.textElement.style.backgroundColor = this.styleSettings.backgroundColor;
     this.textElement.style.textShadow = this.styleSettings.textShadow;
+
+    if (this.secondaryTextElement) {
+      this.secondaryTextElement.style.fontSize = `${Math.max(13, Math.round(this.styleSettings.fontSize * 0.72))}px`;
+    }
   }
 
   /**
-   * Sets temporary live streaming cue (displayed during speech generation)
+   * Sets temporary live streaming cue (displayed during speech transcription)
    */
   setLiveCue(text, startMs, endMs) {
     if (!text) {
@@ -92,7 +109,7 @@ class SubtitleRenderer {
 
   /**
    * Adds or updates a finalized translated subtitle cue
-   * @param {Object} cue - { text: string, startMs: number, endMs: number }
+   * @param {Object} cue - { text: string, originalText?: string, startMs: number, endMs: number }
    */
   addCue(cue) {
     if (!cue || !cue.text) return;
@@ -100,6 +117,7 @@ class SubtitleRenderer {
     const newCue = {
       id: `${cue.startMs}_${cue.endMs}`,
       text: cue.text,
+      originalText: cue.originalText || '',
       startMs: cue.startMs,
       endMs: cue.endMs
     };
@@ -120,6 +138,10 @@ class SubtitleRenderer {
       if (this.textElement) {
         this.textElement.textContent = '';
         this.textElement.classList.remove('visible');
+      }
+      if (this.secondaryTextElement) {
+        this.secondaryTextElement.textContent = '';
+        this.secondaryTextElement.classList.remove('visible');
       }
     }
   }
@@ -172,14 +194,17 @@ class SubtitleRenderer {
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
-    // 1. Check if we have an active live streaming cue
+    // 1. Check if we have an active live streaming transcription preview
     if (this.liveCue && currentTimeMs >= this.liveCue.startMs - 500 && currentTimeMs <= this.liveCue.endMs + 1000) {
       this.textElement.textContent = this.liveCue.text;
       this.textElement.classList.add('visible');
+      if (this.secondaryTextElement) {
+        this.secondaryTextElement.classList.remove('visible');
+      }
       return;
     }
 
-    // 2. Otherwise look in finalized cues
+    // 2. Otherwise render finalized cues
     const activeCue = this.cues.find(
       c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs + 300
     );
@@ -189,12 +214,24 @@ class SubtitleRenderer {
         this.currentCue = activeCue;
         this.textElement.textContent = activeCue.text;
         this.textElement.classList.add('visible');
+
+        // Render Dual Subtitles if originalText exists and enabled
+        if (this.showDualSubtitles && activeCue.originalText && this.secondaryTextElement) {
+          this.secondaryTextElement.textContent = activeCue.originalText;
+          this.secondaryTextElement.classList.add('visible');
+        } else if (this.secondaryTextElement) {
+          this.secondaryTextElement.classList.remove('visible');
+        }
       }
     } else {
       if (this.currentCue !== null) {
         this.currentCue = null;
         this.textElement.textContent = '';
         this.textElement.classList.remove('visible');
+        if (this.secondaryTextElement) {
+          this.secondaryTextElement.textContent = '';
+          this.secondaryTextElement.classList.remove('visible');
+        }
       }
     }
   }
@@ -217,6 +254,10 @@ class SubtitleRenderer {
       this.textElement.textContent = '';
       this.textElement.classList.remove('visible');
     }
+    if (this.secondaryTextElement) {
+      this.secondaryTextElement.textContent = '';
+      this.secondaryTextElement.classList.remove('visible');
+    }
     this.setStatus('idle');
   }
 
@@ -230,6 +271,7 @@ class SubtitleRenderer {
     }
     this.container = null;
     this.textElement = null;
+    this.secondaryTextElement = null;
     this.statusElement = null;
   }
 }

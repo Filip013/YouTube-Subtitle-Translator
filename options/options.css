@@ -221,6 +221,20 @@ body {
   text-decoration: underline;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.checkbox-label input {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+}
+
 .input-group {
   display: flex;
   gap: 8px;
@@ -304,37 +318,6 @@ body {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* Preset pills */
-.preset-pills {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.preset-pills span {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.preset-pill {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.preset-pill:hover {
-  background: rgba(56, 189, 248, 0.1);
-  color: var(--primary);
-  border-color: var(--primary);
-}
-
 /* Buttons */
 .btn-primary {
   background: var(--primary);
@@ -384,11 +367,6 @@ body {
 
 .btn-danger-outline:hover {
   background: rgba(248, 113, 113, 0.1);
-}
-
-.flex-row-gap {
-  display: flex;
-  gap: 12px;
 }
 
 /* Video Library Cards */
@@ -541,7 +519,7 @@ body {
 .preview-box {
   background: #000000;
   border-radius: var(--radius-sm);
-  height: 180px;
+  height: 200px;
   position: relative;
   overflow: hidden;
   border: 1px solid var(--border-color);
@@ -558,6 +536,28 @@ body {
   position: relative;
 }
 
+.preview-dual-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  bottom: 12%;
+  max-width: 85%;
+}
+
+.preview-original-text {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 4px;
+  color: #cbd5e1;
+  background-color: rgba(15, 23, 42, 0.75);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .preview-subtitle-text {
   display: inline-block;
   padding: 6px 16px;
@@ -569,12 +569,8 @@ body {
   font-weight: 600;
   text-align: center;
   line-height: 1.4;
-  max-width: 85%;
-  position: absolute;
-  bottom: 12%;
   text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.85);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-  transition: all 0.1s ease;
 }
 
 /* Feedback banner */

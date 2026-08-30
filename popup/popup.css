@@ -25,7 +25,7 @@
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
-  width: 330px;
+  width: 340px;
   font-size: 13px;
   user-select: none;
 }
@@ -34,7 +34,7 @@ body {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 13px;
 }
 
 /* Header */
@@ -71,7 +71,7 @@ body {
 
 .badge {
   display: inline-block;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   color: #38bdf8;
   background: rgba(56, 189, 248, 0.12);
@@ -87,6 +87,11 @@ body {
   width: 40px;
   height: 22px;
   flex-shrink: 0;
+}
+
+.switch.small {
+  width: 34px;
+  height: 18px;
 }
 
 .switch input {
@@ -119,6 +124,13 @@ body {
   border-radius: 50%;
 }
 
+.switch.small .slider:before {
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+}
+
 input:checked + .slider {
   background-color: var(--primary);
 }
@@ -127,17 +139,21 @@ input:checked + .slider:before {
   transform: translateX(18px);
 }
 
+.switch.small input:checked + .slider:before {
+  transform: translateX(16px);
+}
+
 /* Content Sections */
 .main-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 11px;
 }
 
 .section-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .section-label {
@@ -154,7 +170,7 @@ input:checked + .slider:before {
   justify-content: space-between;
 }
 
-/* Segmented Control */
+/* Segmented Control (Script) */
 .segmented-control {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -194,9 +210,33 @@ input:checked + .slider:before {
   color: #0f172a;
 }
 
-.segment-btn:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-main);
+/* Gender Segmented Control */
+.gender-segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1.2fr;
+  background: var(--bg-card);
+  padding: 3px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  gap: 4px;
+}
+
+.gender-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.gender-btn.active {
+  background: var(--primary);
+  color: #0f172a;
 }
 
 /* Memory Card */
@@ -244,7 +284,7 @@ input:checked + .slider:before {
 }
 
 /* Form inputs & selects */
-.form-input, .form-select {
+.form-input {
   width: 100%;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -256,7 +296,7 @@ input:checked + .slider:before {
   transition: border-color 0.15s;
 }
 
-.form-input:focus, .form-select:focus {
+.form-input:focus {
   border-color: var(--primary);
 }
 

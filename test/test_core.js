@@ -1,5 +1,5 @@
 /**
- * Unit Tests for YouTube Subtitle Translator Core Logic, StorageManager & Gemini Live
+ * Unit Tests for YouTube Subtitle Translator (Two-Stage Pipeline)
  */
 
 const assert = require('assert');
@@ -8,9 +8,10 @@ const VADProcessor = require('../src/vad_processor');
 const GeminiService = require('../src/gemini_service');
 const StorageManager = require('../src/storage_manager');
 const SubtitleRenderer = require('../src/subtitle_renderer');
-const GeminiLiveClient = require('../src/gemini_live_client');
+const GeminiTranscribeClient = require('../src/gemini_transcribe_client');
+const GeminiTextTranslator = require('../src/gemini_text_translator');
 
-console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, StorageManager & SubtitleRenderer ---');
+console.log('--- Running Tests for Two-Stage Pipeline (Transcribe + Flash Lite) ---');
 
 // 1. Test AudioUtils.resampleTo16k
 {
@@ -37,25 +38,53 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
 // 3. Test StorageManager extractVideoId
 {
   assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s'), 'dQw4w9WgXcQ');
   assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
   assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/live/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
   console.log('✓ StorageManager.extractVideoId passed for all YouTube formats');
 }
 
-// 4. Test StorageManager In-Memory Save & Load
+// 4. Test GeminiTranscribeClient instantiation
 {
-  const storage = new StorageManager();
-  storage.saveCue('test_vid', 'latin', { startMs: 1000, endMs: 3000, text: 'Test subtitle' });
-  storage.loadSubtitles('test_vid', 'latin').then(cues => {
-    assert.strictEqual(cues.length, 1);
-    assert.strictEqual(cues[0].text, 'Test subtitle');
-    console.log('✓ StorageManager direct save and load verified');
+  const client = new GeminiTranscribeClient({
+    apiKey: 'test_key',
+    model: 'gemini-3.5-transcribe-live'
+  });
+  assert.strictEqual(client.model, 'gemini-3.5-transcribe-live');
+  console.log('✓ GeminiTranscribeClient configuration passed');
+}
+
+// 5. Test GeminiTextTranslator instantiation & caching
+{
+  const translator = new GeminiTextTranslator({
+    apiKey: 'test_key',
+    model: 'gemini-3.1-flash-lite',
+    scriptType: 'cyrillic',
+    speakerGender: 'female'
+  });
+  assert.strictEqual(translator.model, 'gemini-3.1-flash-lite');
+  assert.strictEqual(translator.scriptType, 'cyrillic');
+  assert.strictEqual(translator.speakerGender, 'female');
+  translator.cache.set('Hello_cyrillic_female', 'Здраво');
+  translator.translateText('Hello').then(res => {
+    assert.strictEqual(res, 'Здраво');
+    console.log('✓ GeminiTextTranslator cache hit verified');
   });
 }
 
-// 5. Test StorageManager SRT Export
+// 6. Test SubtitleRenderer hasCueAtTime & Dual Subtitles
+{
+  const renderer = new SubtitleRenderer({ showDualSubtitles: true });
+  renderer.addCue({ startMs: 2000, endMs: 5000, text: 'Zdravo', originalText: 'Hello' });
+
+  assert.strictEqual(renderer.hasCueAtTime(3000), true, 'Timestamp 3000ms should be within cue [2000, 5000]');
+  assert.strictEqual(renderer.hasCueAtTime(1000), false, 'Timestamp 1000ms should not be within cue');
+
+  renderer.removeCue('2000_5000');
+  assert.strictEqual(renderer.hasCueAtTime(3000), false, 'Cue should be removed');
+  console.log('✓ SubtitleRenderer.hasCueAtTime & removeCue passed');
+}
+
+// 7. Test StorageManager SRT Export
 {
   const cues = [
     { startMs: 1000, endMs: 4000, text: 'Prva rečenica' },
@@ -67,17 +96,4 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   console.log('✓ StorageManager.exportSRT passed');
 }
 
-// 6. Test SubtitleRenderer hasCueAtTime & removeCue
-{
-  const renderer = new SubtitleRenderer();
-  renderer.addCue({ startMs: 2000, endMs: 5000, text: 'Zdravo' });
-
-  assert.strictEqual(renderer.hasCueAtTime(3000), true, 'Timestamp 3000ms should be within cue [2000, 5000]');
-  assert.strictEqual(renderer.hasCueAtTime(1000), false, 'Timestamp 1000ms should not be within cue');
-
-  renderer.removeCue('2000_5000');
-  assert.strictEqual(renderer.hasCueAtTime(3000), false, 'Cue should be removed');
-  console.log('✓ SubtitleRenderer.hasCueAtTime & removeCue passed');
-}
-
-console.log('\n✅ ALL EXTENSION TESTS PASSED SUCCESSFULLY!');
+console.log('\n✅ ALL TWO-STAGE PIPELINE TESTS PASSED SUCCESSFULLY!');

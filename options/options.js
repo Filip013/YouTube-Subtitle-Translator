@@ -1,6 +1,6 @@
 /**
  * Options Script for YouTube Subtitle Translator
- * Handles settings, live preview, and Subtitle & Fragment Manager.
+ * Handles Two-Stage Pipeline settings, live preview, and Subtitle & Fragment Manager.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -9,12 +9,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnToggleKeyVisibility = document.getElementById('btn-toggle-key-visibility');
   const btnTestApi = document.getElementById('btn-test-api');
   const apiTestFeedback = document.getElementById('api-test-feedback');
-  const modelIdInput = document.getElementById('model-id');
-  const presetPills = document.querySelectorAll('.preset-pill');
+
+  const transcribeModelIdInput = document.getElementById('transcribe-model-id');
+  const translateModelIdInput = document.getElementById('translate-model-id');
 
   const scriptTypeRadios = document.querySelectorAll('input[name="scriptType"]');
-  const vadSensitivitySelect = document.getElementById('vad-sensitivity');
+  const speakerGenderSelect = document.getElementById('speaker-gender-select');
+  const checkDualSubtitles = document.getElementById('check-dual-subtitles');
 
+  const vadSensitivitySelect = document.getElementById('vad-sensitivity');
   const sliderSilence = document.getElementById('slider-silence');
   const valSilence = document.getElementById('val-silence');
   const sliderMaxDuration = document.getElementById('slider-max-duration');
@@ -27,7 +30,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const colorFont = document.getElementById('color-font');
   const colorBg = document.getElementById('color-bg');
 
+  const previewWrapper = document.getElementById('preview-wrapper');
+  const previewOriginal = document.getElementById('preview-original');
   const previewSubtitle = document.getElementById('preview-subtitle');
+
   const btnSaveAll = document.getElementById('btn-save-all');
   const saveStatusMsg = document.getElementById('save-status-msg');
   const btnClearCache = document.getElementById('btn-clear-cache');
@@ -49,8 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    model: 'gemini-3.1-flash-live',
+    transcribeModel: 'gemini-3.5-transcribe-live',
+    translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin',
+    speakerGender: 'auto',
+    showDualSubtitles: false,
     sensitivity: 'medium',
     silenceHangoverMs: 350,
     maxSpeechDurationMs: 5000,
@@ -63,13 +72,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load existing settings
   chrome.storage.sync.get(defaultSettings, (items) => {
     apiKeyInput.value = items.apiKey || '';
-    modelIdInput.value = items.model || 'gemini-3.1-flash-live';
+    transcribeModelIdInput.value = items.transcribeModel || 'gemini-3.5-transcribe-live';
+    translateModelIdInput.value = items.translateModel || 'gemini-3.1-flash-lite';
     currentScriptType = items.scriptType || 'latin';
 
     scriptTypeRadios.forEach(radio => {
       radio.checked = radio.value === items.scriptType;
     });
 
+    speakerGenderSelect.value = items.speakerGender || 'auto';
+    checkDualSubtitles.checked = Boolean(items.showDualSubtitles);
     vadSensitivitySelect.value = items.sensitivity || 'medium';
 
     sliderSilence.value = items.silenceHangoverMs || 350;
@@ -171,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     modalFragmentList.innerHTML = '';
 
-    activeModalCues.forEach((cue, index) => {
+    activeModalCues.forEach((cue) => {
       const item = document.createElement('div');
       item.className = 'fragment-item';
 
@@ -182,9 +194,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${mins}:${secs}`;
       };
 
+      const originalHtml = cue.originalText ? `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">EN: ${escapeHTML(cue.originalText)}</div>` : '';
+
       item.innerHTML = `
         <div class="fragment-time">${formatTime(cue.startMs)} - ${formatTime(cue.endMs)}</div>
-        <div class="fragment-text">${escapeHTML(cue.text)}</div>
+        <div class="fragment-text">
+          ${originalHtml}
+          <strong>${escapeHTML(cue.text)}</strong>
+        </div>
         <button type="button" class="fragment-delete-btn" data-id="${cue.startMs}_${cue.endMs}" title="Delete this fragment">❌</button>
       `;
 
@@ -236,7 +253,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Helpers
   function escapeHTML(str) {
     return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
@@ -250,13 +266,6 @@ document.addEventListener('DOMContentLoaded', () => {
       apiKeyInput.type = 'password';
       btnToggleKeyVisibility.textContent = '👁️';
     }
-  });
-
-  // Preset model buttons
-  presetPills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      modelIdInput.value = pill.dataset.model;
-    });
   });
 
   // Slider input updates & preview
@@ -280,6 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   colorFont.addEventListener('input', updateLivePreview);
   colorBg.addEventListener('input', updateLivePreview);
+  checkDualSubtitles.addEventListener('change', updateLivePreview);
 
   scriptTypeRadios.forEach(radio => {
     radio.addEventListener('change', () => {
@@ -294,16 +304,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const bottomOffset = sliderBottomOffset.value;
     const fontColor = colorFont.value;
     const bgColor = colorBg.value;
+    const isDual = checkDualSubtitles.checked;
 
     const selectedScript = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
     if (selectedScript === 'cyrillic') {
-      previewSubtitle.textContent = 'Ово је пример генерисаног превода на српски језик.';
+      previewSubtitle.textContent = 'Ово је пример преведеног титла на српски језик.';
     } else {
-      previewSubtitle.textContent = 'Ovo je primer generisanog prevoda na srpski jezik.';
+      previewSubtitle.textContent = 'Ovo je primer prevedenog titla na srpski jezik.';
     }
 
+    if (isDual) {
+      previewOriginal.classList.remove('hidden');
+    } else {
+      previewOriginal.classList.add('hidden');
+    }
+
+    previewWrapper.style.bottom = `${bottomOffset}%`;
     previewSubtitle.style.fontSize = `${fontSize}px`;
-    previewSubtitle.style.bottom = `${bottomOffset}%`;
     previewSubtitle.style.color = fontColor;
     previewSubtitle.style.backgroundColor = `${bgColor}c7`;
   }
@@ -311,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Test Connection
   btnTestApi.addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
-    const model = modelIdInput.value.trim() || 'gemini-3.1-flash-live';
+    const model = translateModelIdInput.value.trim() || 'gemini-3.1-flash-lite';
 
     if (!key) {
       showApiFeedback('Please enter an API key first.', 'error');
@@ -343,8 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedScript = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
     const settings = {
       apiKey: apiKeyInput.value.trim(),
-      model: modelIdInput.value.trim() || 'gemini-3.1-flash-live',
+      transcribeModel: transcribeModelIdInput.value.trim() || 'gemini-3.5-transcribe-live',
+      translateModel: translateModelIdInput.value.trim() || 'gemini-3.1-flash-lite',
       scriptType: selectedScript,
+      speakerGender: speakerGenderSelect.value,
+      showDualSubtitles: checkDualSubtitles.checked,
       sensitivity: vadSensitivitySelect.value,
       silenceHangoverMs: parseInt(sliderSilence.value, 10),
       maxSpeechDurationMs: parseInt(sliderMaxDuration.value, 10),

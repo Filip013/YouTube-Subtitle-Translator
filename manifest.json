@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Subtitle Translator (Gemini Live)",
-  "version": "1.2.0",
-  "description": "Real-time AI audio subtitle translator to Serbian using Gemini 3.1 Flash Live via WebSockets.",
+  "name": "YouTube Subtitle Translator (Gemini Transcribe + Flash Lite)",
+  "version": "1.3.0",
+  "description": "Real-time AI audio subtitle translator to Serbian using Gemini 3.5 Transcribe Live + Flash Lite.",
   "permissions": [
     "storage",
     "activeTab"
@@ -24,6 +24,8 @@
         "src/audio_utils.js",
         "src/vad_processor.js",
         "src/storage_manager.js",
+        "src/gemini_transcribe_client.js",
+        "src/gemini_text_translator.js",
         "src/gemini_live_client.js",
         "src/gemini_service.js",
         "src/subtitle_renderer.js",
@@ -38,7 +40,7 @@
   ],
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "YouTube Gemini Live Translator",
+    "default_title": "YouTube Gemini Subtitle Translator",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

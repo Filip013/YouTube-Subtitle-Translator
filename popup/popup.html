@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Gemini Live Subtitles</title>
+  <title>YouTube Gemini Subtitles</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
         <div class="logo-icon">✨</div>
         <div class="header-titles">
           <h1>YouTube Translate</h1>
-          <span class="badge">Gemini 3.1 Flash Live</span>
+          <span class="badge">Transcribe Live + Flash Lite</span>
         </div>
       </div>
       <label class="switch" title="Toggle Subtitles">
@@ -40,13 +40,40 @@
         </div>
       </div>
 
+      <!-- Speaker Gender Preference -->
+      <div class="section-group">
+        <label class="section-label">Speaker Gender / Rod govornika</label>
+        <div class="gender-segmented-control">
+          <button type="button" class="gender-btn active" data-gender="auto">
+            <span>Auto</span>
+          </button>
+          <button type="button" class="gender-btn" data-gender="male">
+            <span>Muški (M)</span>
+          </button>
+          <button type="button" class="gender-btn" data-gender="female">
+            <span>Ženski (Ž)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Dual Subtitles Toggle -->
+      <div class="section-group">
+        <div class="flex-between">
+          <label class="section-label" for="toggle-dual-subtitles">Dual Subtitles (EN + SR)</label>
+          <label class="switch small" title="Show original English + Serbian translation">
+            <input type="checkbox" id="toggle-dual-subtitles">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
       <!-- Live Stream Status Card -->
       <div class="memory-card">
         <div class="memory-info">
           <span class="memory-icon">🟢</span>
           <div>
-            <div class="memory-title">Live WebSocket Stream</div>
-            <div id="live-stream-status" class="memory-desc">Active • Hearing Tone & Gender</div>
+            <div class="memory-title">Two-Stage Live Pipeline</div>
+            <div id="live-stream-status" class="memory-desc">gemini-3.5-transcribe-live + Flash Lite</div>
           </div>
         </div>
       </div>
@@ -67,16 +94,6 @@
         </div>
       </div>
 
-      <!-- VAD Sensitivity -->
-      <div class="section-group">
-        <label class="section-label" for="sensitivity-select">Voice Sensitivity</label>
-        <select id="sensitivity-select" class="form-select">
-          <option value="medium">Medium (Standard)</option>
-          <option value="high">High (Quiet Speech / Distant Voices)</option>
-          <option value="low">Low (Noisy Backgrounds)</option>
-        </select>
-      </div>
-
       <!-- API Key Status / Quick Input -->
       <div class="section-group">
         <div class="flex-between">
@@ -87,7 +104,7 @@
           <input type="password" id="api-key-input" class="form-input" placeholder="AIzaSy..." autocomplete="off">
           <button type="button" id="btn-save-key" class="btn-primary" title="Save API Key">Save</button>
         </div>
-        <p id="key-helper" class="helper-text">Key is saved securely in your local browser.</p>
+        <p id="key-helper" class="helper-text">Saved securely in your local browser.</p>
       </div>
 
       <div id="test-result-box" class="test-result-box hidden"></div>
@@ -96,7 +113,7 @@
     <!-- Footer -->
     <footer class="footer">
       <button type="button" id="btn-test-connection" class="btn-secondary">
-        <span>⚡ Test Connection</span>
+        <span>⚡ Test API Key</span>
       </button>
       <button type="button" id="btn-open-options" class="btn-icon" title="Full Options & Video Manager">
         ⚙️ Settings

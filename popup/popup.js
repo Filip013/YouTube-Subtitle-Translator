@@ -1,11 +1,13 @@
 /**
  * Popup Script for YouTube Subtitle Translator
+ * Connects UI with Two-Stage Pipeline (Transcribe Live + Flash Lite)
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
   const toggleEnabled = document.getElementById('toggle-enabled');
   const segmentBtns = document.querySelectorAll('.segment-btn');
-  const sensitivitySelect = document.getElementById('sensitivity-select');
+  const genderBtns = document.querySelectorAll('.gender-btn');
+  const toggleDualSubtitles = document.getElementById('toggle-dual-subtitles');
   const apiKeyInput = document.getElementById('api-key-input');
   const btnSaveKey = document.getElementById('btn-save-key');
   const apiStatusBadge = document.getElementById('api-status-badge');
@@ -17,13 +19,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const storageManager = new StorageManager();
   let currentScriptType = 'latin';
+  let currentSpeakerGender = 'auto';
   let activeVideoId = null;
 
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    model: 'gemini-3.1-flash-live',
+    transcribeModel: 'gemini-3.5-transcribe-live',
+    translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin',
+    speakerGender: 'auto',
+    showDualSubtitles: false,
     sensitivity: 'medium'
   };
 
@@ -31,7 +37,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   chrome.storage.sync.get(defaultSettings, (items) => {
     toggleEnabled.checked = items.enabled;
     currentScriptType = items.scriptType || 'latin';
+    currentSpeakerGender = items.speakerGender || 'auto';
+    toggleDualSubtitles.checked = Boolean(items.showDualSubtitles);
 
+    // Script buttons
     segmentBtns.forEach(btn => {
       if (btn.dataset.script === items.scriptType) {
         btn.classList.add('active');
@@ -40,7 +49,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
-    sensitivitySelect.value = items.sensitivity || 'medium';
+    // Gender buttons
+    genderBtns.forEach(btn => {
+      if (btn.dataset.gender === items.speakerGender) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
 
     if (items.apiKey) {
       apiKeyInput.value = items.apiKey;
@@ -65,7 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (activeVideoId) {
           const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
           if (cues && cues.length > 0) {
-            memoryDesc.textContent = `✨ ${cues.length} subtitle cues remembered`;
+            memoryDesc.textContent = `✨ ${cues.length} subtitle fragments remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
@@ -87,7 +103,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (confirm('Delete all remembered subtitles for this video?')) {
       await storageManager.deleteVideoSubtitles(activeVideoId);
 
-      // Send message to active tab to clear subtitle overlay immediately
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs && tabs[0]) {
           chrome.tabs.sendMessage(tabs[0].id, { action: 'clearActiveVideoSubtitles' }, () => {});
@@ -103,6 +118,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.sync.set({ enabled: toggleEnabled.checked });
   });
 
+  // Toggle Dual Subtitles
+  toggleDualSubtitles.addEventListener('change', () => {
+    chrome.storage.sync.set({ showDualSubtitles: toggleDualSubtitles.checked });
+  });
+
   // Script selection
   segmentBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -115,9 +135,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Sensitivity selection
-  sensitivitySelect.addEventListener('change', () => {
-    chrome.storage.sync.set({ sensitivity: sensitivitySelect.value });
+  // Gender selection
+  genderBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      genderBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSpeakerGender = btn.dataset.gender;
+      chrome.storage.sync.set({ speakerGender: currentSpeakerGender });
+    });
   });
 
   // Save API Key
@@ -141,18 +166,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTestConnection.textContent = '⏳ Testing...';
     hideFeedback();
 
-    chrome.storage.sync.get({ model: 'gemini-3.1-flash-live' }, async (items) => {
-      const result = await GeminiService.testConnection(key, items.model);
-      btnTestConnection.disabled = false;
-      btnTestConnection.textContent = '⚡ Test Connection';
+    const result = await GeminiService.testConnection(key, 'gemini-3.1-flash-lite');
+    btnTestConnection.disabled = false;
+    btnTestConnection.textContent = '⚡ Test API Key';
 
-      if (result.success) {
-        updateApiBadge(true);
-        showFeedback(result.message, 'success');
-      } else {
-        showFeedback(`Failed: ${result.message}`, 'error');
-      }
-    });
+    if (result.success) {
+      updateApiBadge(true);
+      showFeedback(result.message, 'success');
+    } else {
+      showFeedback(`Failed: ${result.message}`, 'error');
+    }
   });
 
   // Open Options

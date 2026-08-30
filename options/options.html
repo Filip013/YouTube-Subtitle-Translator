@@ -14,14 +14,14 @@
         <div class="logo-icon">✨</div>
         <div>
           <h2>Gemini Subtitles</h2>
-          <span class="badge">v1.2.0 Live</span>
+          <span class="badge">v1.3.0 Two-Stage</span>
         </div>
       </div>
       <nav class="sidebar-nav">
-        <a href="#section-api" class="nav-item active">API & Live Model</a>
-        <a href="#section-language" class="nav-item">Language & Script</a>
+        <a href="#section-api" class="nav-item active">Two-Stage AI Models</a>
+        <a href="#section-language" class="nav-item">Language, Gender & Script</a>
         <a href="#section-vad" class="nav-item">Voice Detection (VAD)</a>
-        <a href="#section-appearance" class="nav-item">Appearance & Style</a>
+        <a href="#section-appearance" class="nav-item">Appearance & Dual Subtitles</a>
         <a href="#section-memory" class="nav-item">Subtitle & Fragment Manager</a>
       </nav>
       <div class="sidebar-footer">
@@ -34,14 +34,14 @@
     <main class="content-area">
       <header class="content-header">
         <h1>Extension Settings</h1>
-        <p class="subtitle">Customize real-time audio translation, Gemini 3.1 Flash Live settings, persistent memory, and subtitle styling.</p>
+        <p class="subtitle">Two-Stage AI Pipeline: Stage 1 ASR (gemini-3.5-transcribe-live) + Stage 2 Translation (gemini-3.1-flash-lite).</p>
       </header>
 
-      <!-- Section: API & Model -->
+      <!-- Section: Two-Stage AI Models -->
       <section id="section-api" class="card-section">
         <div class="card-header">
-          <h3>🤖 AI Model & Live WebSocket API</h3>
-          <p>Configure your Google Gemini API credentials and Live streaming model.</p>
+          <h3>🤖 Two-Stage AI Models</h3>
+          <p>Configure your Gemini API key and model endpoints for speech transcription and translation.</p>
         </div>
         <div class="card-body">
           <div class="form-row">
@@ -55,26 +55,26 @@
             <div id="api-test-feedback" class="feedback-banner hidden"></div>
           </div>
 
-          <div class="form-row">
-            <label class="form-label" for="model-id">Live Model ID</label>
-            <input type="text" id="model-id" class="form-input" value="gemini-3.1-flash-live">
-            <div class="preset-pills">
-              <span>Presets:</span>
-              <button type="button" class="preset-pill" data-model="gemini-3.1-flash-live">gemini-3.1-flash-live (Live Audio + Gender/Tone)</button>
-              <button type="button" class="preset-pill" data-model="gemini-3.5-live-translate">gemini-3.5-live-translate</button>
-              <button type="button" class="preset-pill" data-model="gemini-3.5-transcribe-live">gemini-3.5-transcribe-live</button>
-              <button type="button" class="preset-pill" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite</button>
+          <div class="grid-2-col">
+            <div class="form-row">
+              <label class="form-label" for="transcribe-model-id">Stage 1: Live ASR Model</label>
+              <input type="text" id="transcribe-model-id" class="form-input" value="gemini-3.5-transcribe-live">
+              <p class="form-tip">Dedicated live WebSocket speech recognition.</p>
             </div>
-            <p class="form-tip">Live models stream audio over WebSocket without hitting the 15 RPM REST rate limit ceiling.</p>
+            <div class="form-row">
+              <label class="form-label" for="translate-model-id">Stage 2: Translation Model</label>
+              <input type="text" id="translate-model-id" class="form-input" value="gemini-3.1-flash-lite">
+              <p class="form-tip">Translates clean transcripts into natural Serbian in ~60ms.</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- Section: Language & Script -->
+      <!-- Section: Language, Gender & Script -->
       <section id="section-language" class="card-section">
         <div class="card-header">
-          <h3>🇷🇸 Serbian Language & Script</h3>
-          <p>Choose the target alphabet for Serbian translation output.</p>
+          <h3>🇷🇸 Serbian Language, Gender & Script</h3>
+          <p>Choose the target alphabet and speaker gender agreement.</p>
         </div>
         <div class="card-body">
           <div class="form-row">
@@ -84,17 +84,27 @@
                 <input type="radio" name="scriptType" value="latin" checked>
                 <div class="card-content">
                   <strong>Latinica (Serbian Latin)</strong>
-                  <span>Standard Latin alphabet (abeceda, npr. č, ć, ž, š, đ)</span>
+                  <span>Standard Latin alphabet (abeceda: č, ć, ž, š, đ)</span>
                 </div>
               </label>
               <label class="radio-card">
                 <input type="radio" name="scriptType" value="cyrillic">
                 <div class="card-content">
                   <strong>Ћирилица (Serbian Cyrillic)</strong>
-                  <span>Official Serbian Cyrillic alphabet (азбука, нпр. ч, ћ, ж, ш, ђ, љ, њ, џ)</span>
+                  <span>Official Serbian Cyrillic alphabet (азбука: ч, ћ, ж, ш, ђ, љ, њ, џ)</span>
                 </div>
               </label>
             </div>
+          </div>
+
+          <div class="form-row">
+            <label class="form-label" for="speaker-gender-select">Speaker Gender Agreement (Grammatical Gender)</label>
+            <select id="speaker-gender-select" class="form-select">
+              <option value="auto">Auto / Context-dependent (Default)</option>
+              <option value="male">Masculine / Muški rod (e.g. bio sam, rekao sam, video sam)</option>
+              <option value="female">Feminine / Ženski rod (e.g. bila sam, rekla sam, videla sam)</option>
+            </select>
+            <p class="form-tip">Controls the grammatical gender of past tense verbs and adjectives in Serbian.</p>
           </div>
         </div>
       </section>
@@ -103,7 +113,7 @@
       <section id="section-vad" class="card-section">
         <div class="card-header">
           <h3>🎙️ Voice Activity Detection (VAD) & Timing</h3>
-          <p>Controls speech sensitivity and timing boundaries.</p>
+          <p>Controls speech sensitivity and audio streaming parameters.</p>
         </div>
         <div class="card-body">
           <div class="form-row">
@@ -117,26 +127,31 @@
 
           <div class="grid-2-col">
             <div class="form-row">
-              <label class="form-label">Silence Hangover (ms): <span id="val-silence">350</span> ms</label>
+              <label class="form-label">Silence Hangover: <span id="val-silence">350</span> ms</label>
               <input type="range" id="slider-silence" min="200" max="800" step="50" value="350" class="form-range">
-              <p class="form-tip">Duration of silence before ending a subtitle line.</p>
             </div>
             <div class="form-row">
-              <label class="form-label">Max Chunk Duration (ms): <span id="val-max-duration">5000</span> ms</label>
+              <label class="form-label">Max Sentence Duration: <span id="val-max-duration">5000</span> ms</label>
               <input type="range" id="slider-max-duration" min="3000" max="9000" step="500" value="5000" class="form-range">
-              <p class="form-tip">Maximum audio duration before splitting long sentences.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- Section: Appearance & Style -->
+      <!-- Section: Appearance & Dual Subtitles -->
       <section id="section-appearance" class="card-section">
         <div class="card-header">
-          <h3>🎨 Subtitle Appearance & Overlay Preview</h3>
-          <p>Customize font size, colors, background opacity, and vertical position.</p>
+          <h3>🎨 Subtitle Appearance & Dual Subtitles</h3>
+          <p>Customize overlay styling and optionally show original English transcript.</p>
         </div>
         <div class="card-body">
+          <div class="form-row">
+            <label class="checkbox-label">
+              <input type="checkbox" id="check-dual-subtitles">
+              <span><strong>Enable Dual Subtitles</strong> (Show English original above Serbian translation)</span>
+            </label>
+          </div>
+
           <div class="grid-2-col">
             <div class="form-row">
               <label class="form-label">Font Size: <span id="val-font-size">22</span> px</label>
@@ -164,8 +179,13 @@
             <label class="form-label">Live Preview</label>
             <div class="preview-box">
               <div class="preview-video-mock">
-                <div id="preview-subtitle" class="preview-subtitle-text">
-                  Ово је пример генерисаног превода на српски језик.
+                <div class="preview-dual-wrapper" id="preview-wrapper">
+                  <div id="preview-original" class="preview-original-text hidden">
+                    This is an example of the transcribed English sentence.
+                  </div>
+                  <div id="preview-subtitle" class="preview-subtitle-text">
+                    Ово је пример преведеног титла на српски језик.
+                  </div>
                 </div>
               </div>
             </div>
