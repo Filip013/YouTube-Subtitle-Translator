@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Subtitle Translator - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-layout">
+    <!-- Sidebar / Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="logo-icon">✨</div>
+        <div>
+          <h2>Gemini Subtitles</h2>
+          <span class="badge">v1.1.0</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#section-api" class="nav-item active">API & Model</a>
+        <a href="#section-language" class="nav-item">Language & Script</a>
+        <a href="#section-pipeline" class="nav-item">Pipeline & Lookahead</a>
+        <a href="#section-vad" class="nav-item">Voice Detection (VAD)</a>
+        <a href="#section-appearance" class="nav-item">Appearance & Style</a>
+        <a href="#section-cache" class="nav-item">Video Memory & Cache</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button type="button" id="btn-save-all" class="btn-primary w-full">Save All Changes</button>
+        <span id="save-status-msg" class="save-status">All changes saved</span>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="content-area">
+      <header class="content-header">
+        <h1>Extension Settings</h1>
+        <p class="subtitle">Customize real-time audio translation, Gemini 3.5 Flash Lite settings, persistent memory, and subtitle styling.</p>
+      </header>
+
+      <!-- Section: API & Model -->
+      <section id="section-api" class="card-section">
+        <div class="card-header">
+          <h3>🤖 AI Model & Authentication</h3>
+          <p>Configure your Google Gemini API credentials and model parameters.</p>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <label class="form-label" for="api-key">Gemini API Key</label>
+            <div class="input-group">
+              <input type="password" id="api-key" class="form-input" placeholder="Enter your Gemini API key (AIzaSy...)">
+              <button type="button" id="btn-toggle-key-visibility" class="btn-outline">👁️</button>
+              <button type="button" id="btn-test-api" class="btn-outline">Test Connection</button>
+            </div>
+            <p class="form-tip">Get a free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Google AI Studio</a>.</p>
+            <div id="api-test-feedback" class="feedback-banner hidden"></div>
+          </div>
+
+          <div class="form-row">
+            <label class="form-label" for="model-id">Gemini Model ID</label>
+            <input type="text" id="model-id" class="form-input" value="gemini-3.5-flash-lite">
+            <div class="preset-pills">
+              <span>Presets:</span>
+              <button type="button" class="preset-pill" data-model="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Recommended)</button>
+              <button type="button" class="preset-pill" data-model="gemini-2.0-flash-lite">gemini-2.0-flash-lite</button>
+              <button type="button" class="preset-pill" data-model="gemini-2.5-flash">gemini-2.5-flash</button>
+            </div>
+            <p class="form-tip">Flash Lite provides sub-second latency optimal for real-time video subtitles.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Language & Script -->
+      <section id="section-language" class="card-section">
+        <div class="card-header">
+          <h3>🇷🇸 Serbian Language & Script</h3>
+          <p>Choose the target alphabet for Serbian translation output.</p>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <label class="form-label">Target Script</label>
+            <div class="radio-cards">
+              <label class="radio-card">
+                <input type="radio" name="scriptType" value="latin" checked>
+                <div class="card-content">
+                  <strong>Latinica (Serbian Latin)</strong>
+                  <span>Standard Latin alphabet (abeceda, npr. č, ć, ž, š, đ)</span>
+                </div>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="scriptType" value="cyrillic">
+                <div class="card-content">
+                  <strong>Ћирилица (Serbian Cyrillic)</strong>
+                  <span>Official Serbian Cyrillic alphabet (азбука, нпр. ч, ћ, ж, ш, ђ, љ, њ, џ)</span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Pipeline & Lookahead -->
+      <section id="section-pipeline" class="card-section">
+        <div class="card-header">
+          <h3>⚡ Pipeline & Lookahead Concurrency</h3>
+          <p>Control multi-worker parallel chunk dispatching and conversational context chaining.</p>
+        </div>
+        <div class="card-body">
+          <div class="grid-2-col">
+            <div class="form-row">
+              <label class="form-label">Parallel Request Concurrency: <span id="val-concurrency">3</span> workers</label>
+              <input type="range" id="slider-concurrency" min="1" max="5" step="1" value="3" class="form-range">
+              <p class="form-tip">Sends up to 3 chunks in parallel in advance for zero perceived latency.</p>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Conversational Context Chaining</label>
+              <label class="checkbox-container">
+                <input type="checkbox" id="check-context-chaining" checked>
+                <span>Include previous sentence as context for consistent Serbian grammar and pronoun flow</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: VAD & Timing -->
+      <section id="section-vad" class="card-section">
+        <div class="card-header">
+          <h3>🎙️ Voice Activity Detection (VAD) & Timing</h3>
+          <p>Controls how speech chunks and programmatic timestamps are measured from the audio stream.</p>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <label class="form-label" for="vad-sensitivity">VAD Sensitivity</label>
+            <select id="vad-sensitivity" class="form-select">
+              <option value="medium">Medium (Standard Speech)</option>
+              <option value="high">High (Quiet Voices / Whispers)</option>
+              <option value="low">Low (High Noise / Background Music)</option>
+            </select>
+          </div>
+
+          <div class="grid-2-col">
+            <div class="form-row">
+              <label class="form-label">Silence Hangover (ms): <span id="val-silence">350</span> ms</label>
+              <input type="range" id="slider-silence" min="200" max="800" step="50" value="350" class="form-range">
+              <p class="form-tip">Duration of silence before ending a subtitle line and dispatching.</p>
+            </div>
+            <div class="form-row">
+              <label class="form-label">Max Chunk Duration (ms): <span id="val-max-duration">5000</span> ms</label>
+              <input type="range" id="slider-max-duration" min="3000" max="9000" step="500" value="5000" class="form-range">
+              <p class="form-tip">Maximum audio slice duration before splitting long sentences.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Appearance & Style -->
+      <section id="section-appearance" class="card-section">
+        <div class="card-header">
+          <h3>🎨 Subtitle Appearance & Overlay Preview</h3>
+          <p>Customize font size, colors, background opacity, and vertical position.</p>
+        </div>
+        <div class="card-body">
+          <div class="grid-2-col">
+            <div class="form-row">
+              <label class="form-label">Font Size: <span id="val-font-size">22</span> px</label>
+              <input type="range" id="slider-font-size" min="14" max="36" step="1" value="22" class="form-range">
+            </div>
+            <div class="form-row">
+              <label class="form-label">Vertical Position (Bottom Offset): <span id="val-bottom-offset">12</span>%</label>
+              <input type="range" id="slider-bottom-offset" min="5" max="30" step="1" value="12" class="form-range">
+            </div>
+          </div>
+
+          <div class="grid-2-col">
+            <div class="form-row">
+              <label class="form-label" for="color-font">Text Color</label>
+              <input type="color" id="color-font" value="#ffffff" class="form-color">
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="color-bg">Background Color</label>
+              <input type="color" id="color-bg" value="#000000" class="form-color">
+            </div>
+          </div>
+
+          <!-- Live Preview Box -->
+          <div class="form-row">
+            <label class="form-label">Live Preview</label>
+            <div class="preview-box">
+              <div class="preview-video-mock">
+                <div id="preview-subtitle" class="preview-subtitle-text">
+                  Ово је пример генерисаног превода на српски језик.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Storage & Cache -->
+      <section id="section-cache" class="card-section">
+        <div class="card-header">
+          <h3>💾 Persistent Video Memory & Cache</h3>
+          <p>Subtitles are remembered per video ID. Re-watching previously subtitled videos uses 0 API calls.</p>
+        </div>
+        <div class="card-body">
+          <div id="saved-videos-summary" class="memory-stats-box">
+            Loading saved video library...
+          </div>
+          <div class="flex-row-gap">
+            <button type="button" id="btn-clear-cache" class="btn-danger-outline">Clear All Video Subtitles & Cache</button>
+            <button type="button" id="btn-reset-defaults" class="btn-outline">Reset All Settings to Defaults</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="../src/storage_manager.js"></script>
+  <script src="../src/gemini_service.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

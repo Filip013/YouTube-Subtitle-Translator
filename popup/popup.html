@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Gemini Subtitles</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="logo-icon">✨</div>
+        <div class="header-titles">
+          <h1>YouTube Translate</h1>
+          <span class="badge">Gemini 3.5 Flash Lite</span>
+        </div>
+      </div>
+      <label class="switch" title="Toggle Subtitles">
+        <input type="checkbox" id="toggle-enabled" checked>
+        <span class="slider"></span>
+      </label>
+    </header>
+
+    <!-- Main Controls -->
+    <main class="main-content">
+      <!-- Target Script Selection -->
+      <div class="section-group">
+        <label class="section-label">Serbian Script / Pismo</label>
+        <div class="segmented-control">
+          <button type="button" class="segment-btn active" data-script="latin">
+            <span>Latinica</span>
+            <small>Abeceda</small>
+          </button>
+          <button type="button" class="segment-btn" data-script="cyrillic">
+            <span>Ћирилица</span>
+            <small>Азбука</small>
+          </button>
+        </div>
+      </div>
+
+      <!-- Video Memory Status -->
+      <div id="video-memory-card" class="memory-card">
+        <div class="memory-info">
+          <span class="memory-icon">💾</span>
+          <div>
+            <div class="memory-title">Persistent Video Memory</div>
+            <div id="memory-subtitle-count" class="memory-desc">Checking active video...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VAD Sensitivity -->
+      <div class="section-group">
+        <label class="section-label" for="sensitivity-select">Voice Sensitivity</label>
+        <select id="sensitivity-select" class="form-select">
+          <option value="medium">Medium (Standard)</option>
+          <option value="high">High (Quiet Speech / Distant Voices)</option>
+          <option value="low">Low (Noisy Backgrounds)</option>
+        </select>
+      </div>
+
+      <!-- API Key Status / Quick Input -->
+      <div class="section-group">
+        <div class="flex-between">
+          <label class="section-label" for="api-key-input">Gemini API Key</label>
+          <span id="api-status-badge" class="status-indicator warning">Missing Key</span>
+        </div>
+        <div class="input-with-button">
+          <input type="password" id="api-key-input" class="form-input" placeholder="AIzaSy..." autocomplete="off">
+          <button type="button" id="btn-save-key" class="btn-primary" title="Save API Key">Save</button>
+        </div>
+        <p id="key-helper" class="helper-text">Key is saved securely in your local browser.</p>
+      </div>
+
+      <div id="test-result-box" class="test-result-box hidden"></div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <button type="button" id="btn-test-connection" class="btn-secondary">
+        <span>⚡ Test Connection</span>
+      </button>
+      <button type="button" id="btn-open-options" class="btn-icon" title="Full Options & Styling">
+        ⚙️ Settings
+      </button>
+    </footer>
+  </div>
+
+  <script src="../src/storage_manager.js"></script>
+  <script src="../src/gemini_service.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
