@@ -1,7 +1,7 @@
 /**
  * Gemini Text Translator for YouTube Subtitle Translator (Stage 2: Translation)
  * Fast, accurate text-to-text translation from English transcripts to Serbian
- * using gemini-3.1-flash-lite with gender agreement and script selection.
+ * using gemini-3.1-flash-lite with automatic fallback on quota limits (429).
  */
 
 class GeminiTextTranslator {
@@ -11,7 +11,7 @@ class GeminiTextTranslator {
     this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
     this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 
-    this.cache = new Map(); // `${text}_${scriptType}_${speakerGender}` -> translation
+    this.cache = new Map();
     this.lastContextText = '';
   }
 
@@ -23,7 +23,7 @@ class GeminiTextTranslator {
   }
 
   /**
-   * Translates an English transcript sentence to Serbian
+   * Translates an English transcript sentence to Serbian with automatic fallback
    * @param {string} englishText 
    * @returns {Promise<string>} Serbian translation
    */
@@ -71,52 +71,62 @@ Strict Rules:
 3. Keep the translation natural, concise, and contextually accurate for video subtitles.
 4. If the text is unintelligible noise, output [EMPTY].`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
-    const payload = {
-      contents: [
-        {
-          parts: [
-            { text: `${systemPrompt}\n\nEnglish Transcript to Translate:\n"${cleanInput}"` }
-          ]
+    const candidateModels = [this.model, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+
+    for (const modelName of candidateModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.apiKey}`;
+        const payload = {
+          contents: [
+            {
+              parts: [
+                { text: `${systemPrompt}\n\nEnglish Transcript to Translate:\n"${cleanInput}"` }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 200
+          }
+        };
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.status === 429) {
+          console.warn(`[GeminiTranslator] Quota exceeded on ${modelName}, trying fallback model...`);
+          continue; // Try next candidate model
         }
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 200
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error(`[GeminiTranslator] Error on ${modelName}:`, response.status, errorData);
+          continue;
+        }
+
+        const data = await response.json();
+        let translation = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+
+        if (translation === '[EMPTY]' || translation.toLowerCase() === 'empty') {
+          translation = '';
+        }
+
+        if (translation) {
+          translation = translation.replace(/^["']|["']$/g, '').trim();
+          this.cache.set(cacheKey, translation);
+          this.lastContextText = translation;
+        }
+
+        return translation;
+      } catch (err) {
+        console.error(`[GeminiTranslator] Network request failed for ${modelName}:`, err);
       }
-    };
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[GeminiTranslator] Translation error:', response.status, errorData);
-        return cleanInput; // fallback
-      }
-
-      const data = await response.json();
-      let translation = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-
-      if (translation === '[EMPTY]' || translation.toLowerCase() === 'empty') {
-        translation = '';
-      }
-
-      if (translation) {
-        translation = translation.replace(/^["']|["']$/g, '').trim();
-        this.cache.set(cacheKey, translation);
-        this.lastContextText = translation;
-      }
-
-      return translation;
-    } catch (err) {
-      console.error('[GeminiTranslator] Network request failed:', err);
-      return '';
     }
+
+    return cleanInput; // fallback to English if all models failed
   }
 
   clearCache() {

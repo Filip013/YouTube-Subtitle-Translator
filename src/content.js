@@ -1,7 +1,7 @@
 /**
- * Content Script Orchestrator for YouTube Subtitle Translator
- * Flash Live Translation Mode (gemini-3.5-live-translate-preview over WebSocket)
- * Zero REST API quota consumed - Streams live audio and generates Serbian subtitles in real time.
+ * Content Script Orchestrator for YouTube Subtitle Translator (Two-Stage Live Pipeline)
+ * Stage 1: gemini-3.5-live-translate-preview (Live WebSocket ASR - 0 REST quota used)
+ * Stage 2: GeminiTextTranslator with automatic 429 fallback for natural Serbian subtitles.
  */
 
 (function () {
@@ -11,6 +11,7 @@
   let vadProcessor = null;
   let audioCapture = null;
   let liveClient = null;
+  let textTranslator = null;
   let storageManager = null;
   let subtitleRenderer = null;
   let isInitialized = false;
@@ -18,11 +19,12 @@
   // Real-time telemetry state
   const diagnostics = {
     videoId: null,
-    mode: 'Live Translate (gemini-3.5-live-translate-preview)',
+    mode: 'Two-Stage Live Translate',
     status: 'Initializing...',
     audioLevel: 0,
     framesSent: 0,
     cuesSaved: 0,
+    lastTranscribed: '',
     lastTranslated: '',
     wsInfo: null,
     lastError: null,
@@ -34,8 +36,10 @@
     enabled: true,
     apiKey: '',
     liveModel: 'gemini-3.5-live-translate-preview',
+    translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
+    showDualSubtitles: false,
     sensitivity: 'medium',
     fontSize: 22,
     fontColor: '#ffffff',
@@ -98,17 +102,25 @@
       fontColor: config.fontColor,
       backgroundColor: config.backgroundColor,
       bottomOffset: config.bottomOffset,
-      showDualSubtitles: false
+      showDualSubtitles: config.showDualSubtitles
     });
     subtitleRenderer.setEnabled(config.enabled);
 
-    // 3. Initialize Flash Live Client (WebSocket Direct Translation)
+    // 3. Initialize Stage 2 Text Translator
+    textTranslator = new GeminiTextTranslator({
+      apiKey: config.apiKey,
+      model: config.translateModel,
+      scriptType: config.scriptType,
+      speakerGender: config.speakerGender
+    });
+
+    // 4. Initialize Live WebSocket Client
     liveClient = new GeminiLiveClient({
       apiKey: config.apiKey,
       model: config.liveModel,
       scriptType: config.scriptType,
       speakerGender: config.speakerGender,
-      onSubtitleChunk: handleSubtitleChunk,
+      onSubtitleChunk: handleLiveChunk,
       onStatusChange: (status, msg) => {
         publishDiagnostics({ status: msg, lastError: status === 'error' ? msg : null });
         if (status === 'connecting') {
@@ -122,19 +134,19 @@
       }
     });
 
-    // 4. Initialize VAD Processor
+    // 5. Initialize VAD Processor
     vadProcessor = new VADProcessor({
       sampleRate: 16000,
       sensitivity: config.sensitivity
     });
 
-    // 5. Initialize Audio Capture Engine
+    // 6. Initialize Audio Capture Engine
     audioCapture = new AudioCaptureEngine({
       vadProcessor: vadProcessor,
       onPCMFrame: (pcmFrame) => {
         if (!config.enabled || !config.apiKey || !liveClient) return;
 
-        // Stream audio continuously to Flash Live WebSocket
+        // Stream audio continuously to Live WebSocket
         liveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
         diagnostics.framesSent++;
         diagnostics.audioLevel = Math.round((pcmFrame.rms || 0) * 100);
@@ -146,7 +158,7 @@
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Flash Live Translation Mode initialized with model:', config.liveModel);
+    console.log('[GeminiSubtitles] Two-Stage Live Translate initialized:', config.liveModel);
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -166,6 +178,15 @@
           });
         }
 
+        if (textTranslator) {
+          textTranslator.updateConfig({
+            apiKey: config.apiKey,
+            model: config.translateModel,
+            scriptType: config.scriptType,
+            speakerGender: config.speakerGender
+          });
+        }
+
         if (vadProcessor && changes.sensitivity) {
           vadProcessor.updateSensitivity(config.sensitivity);
         }
@@ -179,7 +200,7 @@
             fontColor: config.fontColor,
             backgroundColor: config.backgroundColor,
             bottomOffset: config.bottomOffset,
-            showDualSubtitles: false
+            showDualSubtitles: config.showDualSubtitles
           });
         }
 
@@ -196,7 +217,7 @@
           storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
             if (subtitleRenderer) subtitleRenderer.clear();
             if (liveClient) liveClient.resetStream();
-            publishDiagnostics({ cuesSaved: 0, lastTranslated: '' });
+            publishDiagnostics({ cuesSaved: 0, lastTranslated: '', lastTranscribed: '' });
             sendResponse({ success: true });
           });
           return true;
@@ -236,25 +257,35 @@
   }
 
   /**
-   * Handles incoming live translated Serbian subtitles from Flash Live WebSocket
+   * Handles incoming speech chunks from Live WebSocket (Stage 1 -> Stage 2)
    */
-  async function handleSubtitleChunk(chunkData) {
+  async function handleLiveChunk(chunkData) {
     if (!config.enabled || !currentVideoId) return;
 
-    const subtitleText = (chunkData.text || '').trim();
-    if (!subtitleText) return;
+    const transcriptText = (chunkData.text || '').trim();
+    if (!transcriptText) return;
 
     const title = getVideoTitle();
 
     if (!chunkData.isFinal) {
-      // 1. Real-time streaming subtitle preview
-      subtitleRenderer.setLiveCue(subtitleText, chunkData.startMs, chunkData.endMs);
-      publishDiagnostics({ lastTranslated: subtitleText });
+      // 1. Live interim speech preview on player overlay
+      subtitleRenderer.setLiveCue(transcriptText, chunkData.startMs, chunkData.endMs);
+      publishDiagnostics({ lastTranscribed: transcriptText });
     } else {
-      // 2. Finalized Serbian sentence: Save directly to disk (chrome.storage.local) and add as permanent cue
+      // 2. Finalized English sentence: Translate to Serbian via Stage 2 Text Translator
+      const englishText = transcriptText;
+
+      publishDiagnostics({
+        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        lastTranscribed: englishText
+      });
+
+      const serbianText = await textTranslator.translateText(englishText);
+      const displayText = serbianText || englishText;
+
       const cue = {
-        text: subtitleText,
-        originalText: '',
+        text: displayText,
+        originalText: englishText,
         startMs: chunkData.startMs,
         endMs: chunkData.endMs
       };
@@ -264,11 +295,12 @@
       if (storageManager) {
         await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
         publishDiagnostics({
-          status: 'Saved Serbian subtitle to disk!',
-          lastTranslated: subtitleText,
+          status: 'Fragment translated & saved!',
+          lastTranscribed: englishText,
+          lastTranslated: displayText,
           cuesSaved: subtitleRenderer.getCues().length
         });
-        console.log(`[GeminiSubtitles] 💾 Persisted Serbian subtitle [${cue.startMs}ms - ${cue.endMs}ms]: "${subtitleText}"`);
+        console.log(`[GeminiSubtitles] 💾 Persisted subtitle: "${englishText}" -> "${displayText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
       }
     }
   }
