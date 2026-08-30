@@ -1,6 +1,6 @@
 /**
  * Popup Script for YouTube Subtitle Translator
- * Flash Live Translate Controller & Monitor
+ * Live Telemetry Controller & One-Click Copy Log
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const memoryDesc = document.getElementById('memory-subtitle-count');
   const btnClearCurrentVideo = document.getElementById('btn-clear-current-video');
   const liveDebugLog = document.getElementById('live-debug-log');
+  const btnCopyLog = document.getElementById('btn-copy-log');
 
   const storageManager = new StorageManager();
   let currentScriptType = 'latin';
@@ -64,6 +65,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     refreshLiveTelemetry();
   });
+
+  // One-Click Copy Log Button
+  if (btnCopyLog) {
+    btnCopyLog.addEventListener('click', async () => {
+      const textToCopy = liveDebugLog.textContent.trim();
+      if (!textToCopy) return;
+
+      try {
+        await navigator.clipboard.writeText(textToCopy);
+        const originalText = btnCopyLog.textContent;
+        btnCopyLog.textContent = '✅ Copied!';
+        btnCopyLog.style.borderColor = '#34a853';
+        btnCopyLog.style.color = '#34a853';
+        setTimeout(() => {
+          btnCopyLog.textContent = originalText;
+          btnCopyLog.style.borderColor = '';
+          btnCopyLog.style.color = '';
+        }, 1500);
+      } catch (err) {
+        console.error('Failed to copy text:', err);
+      }
+    });
+  }
 
   // Continuously refresh live telemetry while popup is open
   async function refreshLiveTelemetry() {

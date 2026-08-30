@@ -14,7 +14,7 @@
         <div class="logo-icon">✨</div>
         <div class="header-titles">
           <h1>YouTube Translate</h1>
-          <span class="badge">Flash Live Translate (WebSocket)</span>
+          <span class="badge">Live Telemetry Monitor</span>
         </div>
       </div>
       <label class="switch" title="Toggle Subtitles">
@@ -72,9 +72,14 @@
         </div>
       </div>
 
-      <!-- Live Diagnostics Box -->
+      <!-- Live Diagnostics Box with One-Click Copy -->
       <div class="section-group">
-        <label class="section-label">Live Monitor</label>
+        <div class="flex-between" style="margin-bottom: 6px;">
+          <label class="section-label" style="margin-bottom: 0;">Live Monitor</label>
+          <button type="button" id="btn-copy-log" class="btn-secondary" style="padding: 3px 8px; font-size: 11px; height: auto;" title="Copy entire log to clipboard">
+            📋 Copy Log
+          </button>
+        </div>
         <div id="live-debug-log" class="debug-log-box">
           Live stream connected. Watching for audio...
         </div>
