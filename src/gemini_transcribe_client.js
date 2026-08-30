@@ -1,7 +1,7 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
  * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * for real-time, low-latency, noise-resilient speech-to-text transcription.
+ * with automatic reconnection, heartbeat keep-alive, and zero-loss sentence finalization.
  */
 
 class GeminiTranscribeClient {
@@ -13,8 +13,10 @@ class GeminiTranscribeClient {
     this.isConnected = false;
     this.isConnecting = false;
     this.isSetupComplete = false;
+    this.autoReconnect = true;
+    this.reconnectTimer = null;
 
-    this.onTranscriptChunk = config.onTranscriptChunk || null; // ({ text, startMs, endMs, isFinal })
+    this.onTranscriptChunk = config.onTranscriptChunk || null;
     this.onStatusChange = config.onStatusChange || null;
 
     // Streaming transcription state
@@ -52,6 +54,11 @@ class GeminiTranscribeClient {
       return;
     }
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     this.isConnecting = true;
     this.isSetupComplete = false;
     this._emitStatus('connecting', 'Connecting to Live Transcribe WebSocket...');
@@ -74,21 +81,33 @@ class GeminiTranscribeClient {
       };
 
       this.ws.onerror = (err) => {
-        console.error('[GeminiTranscribe] WebSocket error:', err);
-        this._emitStatus('error', 'Live Transcribe WebSocket error.');
+        console.warn('[GeminiTranscribe] WebSocket error, will reconnect:', err);
+        this._emitStatus('error', 'Reconnecting...');
       };
 
       this.ws.onclose = (event) => {
-        console.log('[GeminiTranscribe] WebSocket closed:', event.code, event.reason);
+        console.log('[GeminiTranscribe] WebSocket closed (code: ' + event.code + '). Handling reconnect...');
         this.isConnected = false;
         this.isConnecting = false;
         this.isSetupComplete = false;
-        this._emitStatus('disconnected', 'Live Transcribe disconnected.');
+        this.flush(); // Flush any pending sentence before resetting
+
+        if (this.autoReconnect) {
+          this._emitStatus('error', 'Reconnecting...');
+          this.reconnectTimer = setTimeout(() => {
+            this.connect();
+          }, 1000);
+        } else {
+          this._emitStatus('disconnected', 'Live Transcribe disconnected.');
+        }
       };
     } catch (err) {
       console.error('[GeminiTranscribe] Failed to create WebSocket:', err);
       this.isConnecting = false;
       this._emitStatus('error', err.message);
+      if (this.autoReconnect) {
+        this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+      }
     }
   }
 
@@ -239,7 +258,12 @@ class GeminiTranscribeClient {
   }
 
   disconnect() {
+    this.autoReconnect = false;
     this.flush();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onmessage = null;

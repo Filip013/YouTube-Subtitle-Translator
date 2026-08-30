@@ -244,7 +244,7 @@
   }
 
   /**
-   * Check for YouTube player element and attach capture
+   * Check for YouTube player element and attach capture idempotently
    */
   async function checkAndAttachPlayer() {
     const videoId = StorageManager.extractVideoId(window.location.href);
@@ -281,21 +281,21 @@
 
   // Hook YouTube SPA navigation events
   window.addEventListener('yt-navigate-finish', () => {
-    setTimeout(checkAndAttachPlayer, 300);
+    setTimeout(checkAndAttachPlayer, 200);
   });
 
   window.addEventListener('spfdone', () => {
-    setTimeout(checkAndAttachPlayer, 300);
+    setTimeout(checkAndAttachPlayer, 200);
   });
 
-  const observer = new MutationObserver(() => {
-    const video = document.querySelector('video.html5-main-video');
-    if (video && (!audioCapture || audioCapture.videoElement !== video)) {
+  // Track URL changes safely
+  let lastObservedUrl = window.location.href;
+  setInterval(() => {
+    if (window.location.href !== lastObservedUrl) {
+      lastObservedUrl = window.location.href;
       checkAndAttachPlayer();
     }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
+  }, 1000);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

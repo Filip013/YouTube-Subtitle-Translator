@@ -1,14 +1,14 @@
 /**
  * Subtitle Renderer for YouTube Subtitle Translator
  * Creates, updates, and synchronizes the custom subtitle overlay on YouTube's player.
- * Supports Dual Subtitles (Original English + Translated Serbian) and custom styling.
+ * Supports Dual Subtitles (Original English + Translated Serbian) and persistent rendering.
  */
 
 class SubtitleRenderer {
   constructor(options = {}) {
     this.container = null;
     this.textElement = null;
-    this.secondaryTextElement = null; // For Dual Subtitles (Original text)
+    this.secondaryTextElement = null;
     this.statusElement = null;
     this.videoElement = null;
     this.playerContainer = null;
@@ -30,19 +30,32 @@ class SubtitleRenderer {
   }
 
   /**
-   * Initializes overlay inside the YouTube player element
-   * @param {HTMLElement} playerContainer
-   * @param {HTMLVideoElement} videoElement
+   * Initializes overlay inside the YouTube player element safely without destroying existing state
    */
   init(playerContainer, videoElement) {
     if (!playerContainer || !videoElement) return;
 
+    // If already attached to this container and video, do NOT destroy or reset
+    if (this.playerContainer === playerContainer && this.videoElement === videoElement && this.container && this.container.isConnected) {
+      return;
+    }
+
     this.playerContainer = playerContainer;
     this.videoElement = videoElement;
 
-    this.destroy();
+    this._cleanupDOMOnly();
     this._createDOM();
     this._startSyncLoop();
+  }
+
+  _cleanupDOMOnly() {
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.removeChild(this.container);
+    }
+    this.container = null;
+    this.textElement = null;
+    this.secondaryTextElement = null;
+    this.statusElement = null;
   }
 
   _createDOM() {
@@ -54,11 +67,9 @@ class SubtitleRenderer {
     this.statusElement.className = 'gemini-yt-subtitle-status';
     this.statusElement.title = 'Gemini Subtitles (Serbian)';
 
-    // Secondary original transcript element (Dual Subtitles)
     this.secondaryTextElement = document.createElement('div');
     this.secondaryTextElement.className = 'gemini-yt-subtitle-original';
 
-    // Primary Serbian translation element
     this.textElement = document.createElement('div');
     this.textElement.className = 'gemini-yt-subtitle-text';
 
@@ -173,7 +184,7 @@ class SubtitleRenderer {
     } else if (status === 'error') {
       this.statusElement.classList.remove('translating');
       this.statusElement.classList.add('error');
-      this.statusElement.textContent = '⚠️ Translation Error';
+      this.statusElement.textContent = '⚠️ Reconnecting...';
     } else {
       this.statusElement.classList.remove('translating', 'error');
       this.statusElement.textContent = '';
@@ -181,6 +192,8 @@ class SubtitleRenderer {
   }
 
   _startSyncLoop() {
+    if (this.rafId) return;
+
     const update = () => {
       if (this.isEnabled && this.videoElement && !this.videoElement.paused) {
         const currentTimeMs = this.videoElement.currentTime * 1000;
@@ -266,13 +279,10 @@ class SubtitleRenderer {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
-    if (this.container && this.container.parentNode) {
-      this.container.parentNode.removeChild(this.container);
-    }
-    this.container = null;
-    this.textElement = null;
-    this.secondaryTextElement = null;
-    this.statusElement = null;
+    this._cleanupDOMOnly();
+    this.cues = [];
+    this.liveCue = null;
+    this.currentCue = null;
   }
 }
 
