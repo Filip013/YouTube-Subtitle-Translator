@@ -1,8 +1,7 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
  * Connects to Google's Multimodal Live API (gemini-3.1-flash-live-preview)
- * Uses responseModalities: ["AUDIO"] (required by Multimodal Live API) and extracts
- * real-time Serbian text subtitles from modelTurn parts without playing the audio stream.
+ * Uses modern realtimeInput.audio schema for continuous 16kHz PCM streaming.
  */
 
 class GeminiLiveClient {
@@ -225,14 +224,13 @@ Strict Rules:
       this.turnStartVideoTimeMs = Math.max(0, currentMs - 200);
     }
 
+    // Modern Gemini 3.1 Live API audio payload schema
     const audioPayload = {
       realtimeInput: {
-        mediaChunks: [
-          {
-            mimeType: 'audio/pcm;rate=16000',
-            data: base64PCM
-          }
-        ]
+        audio: {
+          mimeType: 'audio/pcm;rate=16000',
+          data: base64PCM
+        }
       }
     };
 
