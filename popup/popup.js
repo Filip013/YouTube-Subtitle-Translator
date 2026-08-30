@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    liveModel: 'gemini-3.1-flash-live-preview',
+    liveModel: 'gemini-3.5-live-translate-preview',
     scriptType: 'latin',
     speakerGender: 'auto',
     sensitivity: 'medium'
@@ -191,7 +191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTestConnection.textContent = '⏳ Testing...';
     hideFeedback();
 
-    const result = await GeminiService.testConnection(key, 'gemini-3.1-flash-live-preview');
+    const result = await GeminiService.testConnection(key, 'gemini-3.5-live-translate-preview');
     btnTestConnection.disabled = false;
     btnTestConnection.textContent = '⚡ Test API';
 
