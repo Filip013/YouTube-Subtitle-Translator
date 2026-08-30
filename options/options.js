@@ -1,5 +1,6 @@
 /**
  * Options Script for YouTube Subtitle Translator
+ * Handles settings, live preview, and Subtitle & Fragment Manager.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -30,10 +31,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSaveAll = document.getElementById('btn-save-all');
   const saveStatusMsg = document.getElementById('save-status-msg');
   const btnClearCache = document.getElementById('btn-clear-cache');
-  const btnResetDefaults = document.getElementById('btn-reset-defaults');
-  const savedVideosSummary = document.getElementById('saved-videos-summary');
+  const videoLibraryContainer = document.getElementById('video-library-container');
+
+  // Modal Elements
+  const fragmentModal = document.getElementById('fragment-modal');
+  const modalVideoTitle = document.getElementById('modal-video-title');
+  const modalFragmentList = document.getElementById('modal-fragment-list');
+  const modalBtnClose = document.getElementById('modal-btn-close');
+  const modalBtnExport = document.getElementById('modal-btn-export');
+  const modalBtnDeleteAll = document.getElementById('modal-btn-delete-all');
 
   const storageManager = new StorageManager();
+  let currentScriptType = 'latin';
+  let activeModalVideoId = null;
+  let activeModalCues = [];
 
   const defaultSettings = {
     enabled: true,
@@ -53,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.sync.get(defaultSettings, (items) => {
     apiKeyInput.value = items.apiKey || '';
     modelIdInput.value = items.model || 'gemini-3.1-flash-live';
+    currentScriptType = items.scriptType || 'latin';
 
     scriptTypeRadios.forEach(radio => {
       radio.checked = radio.value === items.scriptType;
@@ -76,29 +88,157 @@ document.addEventListener('DOMContentLoaded', () => {
     colorBg.value = items.backgroundColor || '#000000';
 
     updateLivePreview();
-    loadSavedVideosList();
+    renderVideoLibrary();
   });
 
-  async function loadSavedVideosList() {
+  // Render list of saved videos
+  async function renderVideoLibrary() {
     try {
       const videos = await storageManager.getAllSavedVideos();
       if (!videos || videos.length === 0) {
-        savedVideosSummary.innerHTML = '<em>No videos currently stored in memory. Watch any YouTube video with subtitles enabled to start caching!</em>';
+        videoLibraryContainer.innerHTML = `
+          <div style="padding: 20px; text-align: center; color: var(--text-muted);">
+            No videos currently saved in memory. Watch any YouTube video with subtitles enabled to start caching!
+          </div>
+        `;
         return;
       }
 
-      let totalCues = videos.reduce((acc, v) => acc + (v.cueCount || 0), 0);
-      savedVideosSummary.innerHTML = `
-        <div style="font-weight: 600; color: #f8fafc; margin-bottom: 6px;">
-          📚 Subtitle Memory Library: ${videos.length} video(s) cached (${totalCues} total subtitle cues)
-        </div>
-        <div style="font-size: 11px; opacity: 0.8;">
-          When watching any of these videos, subtitles will render instantly without using Gemini API tokens.
-        </div>
-      `;
+      videoLibraryContainer.innerHTML = '';
+
+      videos.forEach(v => {
+        const card = document.createElement('div');
+        card.className = 'video-entry-card';
+
+        const updatedDate = v.updatedAt ? new Date(v.updatedAt).toLocaleDateString() : 'Recently';
+
+        card.innerHTML = `
+          <div class="video-entry-info">
+            <div class="video-entry-title">${escapeHTML(v.videoTitle || 'YouTube Video')}</div>
+            <div class="video-entry-meta">
+              ID: <code>${v.videoId}</code> • <strong>${v.cueCount || 0} fragments</strong> • Saved: ${updatedDate}
+            </div>
+          </div>
+          <div class="video-entry-actions">
+            <button type="button" class="btn-outline btn-view-fragments" data-id="${v.videoId}" data-title="${escapeHTML(v.videoTitle || '')}">
+              👁️ View Fragments
+            </button>
+            <button type="button" class="btn-danger-outline btn-delete-video" data-id="${v.videoId}">
+              🗑️
+            </button>
+          </div>
+        `;
+
+        videoLibraryContainer.appendChild(card);
+      });
+
+      // Bind action buttons
+      document.querySelectorAll('.btn-view-fragments').forEach(btn => {
+        btn.addEventListener('click', () => {
+          openFragmentModal(btn.dataset.id, btn.dataset.title);
+        });
+      });
+
+      document.querySelectorAll('.btn-delete-video').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (confirm('Delete all remembered subtitles for this video?')) {
+            await storageManager.deleteVideoSubtitles(btn.dataset.id);
+            renderVideoLibrary();
+          }
+        });
+      });
     } catch (err) {
-      savedVideosSummary.textContent = 'Could not load video memory stats.';
+      videoLibraryContainer.textContent = 'Could not load video memory library.';
     }
+  }
+
+  // Open Fragment Modal
+  async function openFragmentModal(videoId, title) {
+    activeModalVideoId = videoId;
+    modalVideoTitle.textContent = title || `Subtitles for (${videoId})`;
+    modalFragmentList.innerHTML = '<div style="padding: 10px; color: var(--text-muted);">Loading fragments...</div>';
+    fragmentModal.classList.remove('hidden');
+
+    activeModalCues = await storageManager.loadSubtitles(videoId, currentScriptType);
+    renderModalFragments();
+  }
+
+  function renderModalFragments() {
+    if (!activeModalCues || activeModalCues.length === 0) {
+      modalFragmentList.innerHTML = '<div style="padding: 15px; color: var(--text-muted); text-align: center;">No subtitle fragments for this video.</div>';
+      return;
+    }
+
+    modalFragmentList.innerHTML = '';
+
+    activeModalCues.forEach((cue, index) => {
+      const item = document.createElement('div');
+      item.className = 'fragment-item';
+
+      const formatTime = (ms) => {
+        const totalSec = Math.floor(ms / 1000);
+        const mins = String(Math.floor(totalSec / 60)).padStart(2, '0');
+        const secs = String(totalSec % 60).padStart(2, '0');
+        return `${mins}:${secs}`;
+      };
+
+      item.innerHTML = `
+        <div class="fragment-time">${formatTime(cue.startMs)} - ${formatTime(cue.endMs)}</div>
+        <div class="fragment-text">${escapeHTML(cue.text)}</div>
+        <button type="button" class="fragment-delete-btn" data-id="${cue.startMs}_${cue.endMs}" title="Delete this fragment">❌</button>
+      `;
+
+      modalFragmentList.appendChild(item);
+    });
+
+    // Bind individual delete buttons
+    document.querySelectorAll('.fragment-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cueId = btn.dataset.id;
+        activeModalCues = await storageManager.deleteCue(activeModalVideoId, currentScriptType, cueId);
+        renderModalFragments();
+        renderVideoLibrary();
+      });
+    });
+  }
+
+  // Close Modal
+  modalBtnClose.addEventListener('click', () => {
+    fragmentModal.classList.add('hidden');
+    activeModalVideoId = null;
+  });
+
+  // Export as SRT
+  modalBtnExport.addEventListener('click', () => {
+    if (!activeModalCues || activeModalCues.length === 0) {
+      alert('No subtitles to export.');
+      return;
+    }
+
+    const srtContent = StorageManager.exportSRT(activeModalCues);
+    const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeModalVideoId}_subtitles_serbian.srt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  // Delete All for this Video from Modal
+  modalBtnDeleteAll.addEventListener('click', async () => {
+    if (activeModalVideoId && confirm('Delete all subtitles for this video?')) {
+      await storageManager.deleteVideoSubtitles(activeModalVideoId);
+      fragmentModal.classList.add('hidden');
+      renderVideoLibrary();
+    }
+  });
+
+  // Helpers
+  function escapeHTML(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // Toggle API Key visibility
@@ -142,7 +282,11 @@ document.addEventListener('DOMContentLoaded', () => {
   colorBg.addEventListener('input', updateLivePreview);
 
   scriptTypeRadios.forEach(radio => {
-    radio.addEventListener('change', updateLivePreview);
+    radio.addEventListener('change', () => {
+      currentScriptType = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
+      updateLivePreview();
+      renderVideoLibrary();
+    });
   });
 
   function updateLivePreview() {
@@ -161,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
     previewSubtitle.style.fontSize = `${fontSize}px`;
     previewSubtitle.style.bottom = `${bottomOffset}%`;
     previewSubtitle.style.color = fontColor;
-    previewSubtitle.style.backgroundColor = `${bgColor}c7`; // ~78% opacity
+    previewSubtitle.style.backgroundColor = `${bgColor}c7`;
   }
 
   // Test Connection
@@ -218,21 +362,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Clear cache & storage
+  // Clear all videos
   btnClearCache.addEventListener('click', async () => {
-    if (confirm('Clear all remembered video subtitles and cache?')) {
+    if (confirm('Clear all saved video subtitles and cache?')) {
       await storageManager.clearAll();
-      loadSavedVideosList();
+      renderVideoLibrary();
       alert('All remembered subtitles and cache cleared.');
-    }
-  });
-
-  // Reset defaults
-  btnResetDefaults.addEventListener('click', () => {
-    if (confirm('Are you sure you want to reset all settings to defaults?')) {
-      chrome.storage.sync.set(defaultSettings, () => {
-        location.reload();
-      });
     }
   });
 });

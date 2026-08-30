@@ -51,14 +51,19 @@
         </div>
       </div>
 
-      <!-- Video Memory Status -->
+      <!-- Video Memory Status with Quick Clear Action -->
       <div id="video-memory-card" class="memory-card">
-        <div class="memory-info">
-          <span class="memory-icon">💾</span>
-          <div>
-            <div class="memory-title">Persistent Video Memory</div>
-            <div id="memory-subtitle-count" class="memory-desc">Checking active video...</div>
+        <div class="memory-info flex-between">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="memory-icon">💾</span>
+            <div>
+              <div class="memory-title">Video Memory</div>
+              <div id="memory-subtitle-count" class="memory-desc">Checking video...</div>
+            </div>
           </div>
+          <button type="button" id="btn-clear-current-video" class="btn-clear-video hidden" title="Clear subtitles for this video">
+            🗑️ Clear
+          </button>
         </div>
       </div>
 
@@ -93,7 +98,7 @@
       <button type="button" id="btn-test-connection" class="btn-secondary">
         <span>⚡ Test Connection</span>
       </button>
-      <button type="button" id="btn-open-options" class="btn-icon" title="Full Options & Styling">
+      <button type="button" id="btn-open-options" class="btn-icon" title="Full Options & Video Manager">
         ⚙️ Settings
       </button>
     </footer>

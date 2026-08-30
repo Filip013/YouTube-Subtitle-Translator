@@ -22,7 +22,7 @@
         <a href="#section-language" class="nav-item">Language & Script</a>
         <a href="#section-vad" class="nav-item">Voice Detection (VAD)</a>
         <a href="#section-appearance" class="nav-item">Appearance & Style</a>
-        <a href="#section-cache" class="nav-item">Video Memory & Cache</a>
+        <a href="#section-memory" class="nav-item">Subtitle & Fragment Manager</a>
       </nav>
       <div class="sidebar-footer">
         <button type="button" id="btn-save-all" class="btn-primary w-full">Save All Changes</button>
@@ -173,23 +173,39 @@
         </div>
       </section>
 
-      <!-- Section: Storage & Cache -->
-      <section id="section-cache" class="card-section">
-        <div class="card-header">
-          <h3>💾 Persistent Video Memory & Cache</h3>
-          <p>Subtitles are remembered per video ID. Re-watching previously subtitled videos uses 0 API calls.</p>
+      <!-- Section: Subtitle & Fragment Manager -->
+      <section id="section-memory" class="card-section">
+        <div class="card-header flex-between">
+          <div>
+            <h3>💾 Subtitle & Fragment Manager</h3>
+            <p>View saved video subtitles, delete individual fragments or entire tracks, and export as .SRT.</p>
+          </div>
+          <button type="button" id="btn-clear-cache" class="btn-danger-outline">Clear All Videos</button>
         </div>
         <div class="card-body">
-          <div id="saved-videos-summary" class="memory-stats-box">
+          <div id="video-library-container" class="video-library-list">
             Loading saved video library...
-          </div>
-          <div class="flex-row-gap">
-            <button type="button" id="btn-clear-cache" class="btn-danger-outline">Clear All Video Subtitles & Cache</button>
-            <button type="button" id="btn-reset-defaults" class="btn-outline">Reset All Settings to Defaults</button>
           </div>
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Fragment Viewer / Editor Modal -->
+  <div id="fragment-modal" class="modal-backdrop hidden">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h4 id="modal-video-title">Subtitles for Video</h4>
+        <button type="button" id="modal-btn-close" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modal-fragment-list" class="fragment-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="modal-btn-export" class="btn-outline">📥 Export as .SRT</button>
+        <button type="button" id="modal-btn-delete-all" class="btn-danger-outline">🗑️ Delete All Subtitles for this Video</button>
+      </div>
+    </div>
   </div>
 
   <script src="../src/storage_manager.js"></script>

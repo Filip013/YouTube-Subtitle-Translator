@@ -1,6 +1,7 @@
 /**
  * Storage Manager for YouTube Subtitle Translator
- * Handles persistent storage of video subtitle tracks using chrome.storage.local
+ * Handles persistent storage of video subtitle tracks, individual fragment deletion,
+ * video title metadata, and SRT/VTT export using chrome.storage.local
  */
 
 class StorageManager {
@@ -47,52 +48,61 @@ class StorageManager {
    * @param {string} videoId 
    * @param {string} scriptType 
    * @param {Object} cue - { startMs: number, endMs: number, text: string }
+   * @param {string} [videoTitle] - Title of the YouTube video
    */
-  saveCue(videoId, scriptType = 'latin', cue) {
+  saveCue(videoId, scriptType = 'latin', cue, videoTitle = '') {
     if (!videoId || !cue || !cue.text) return;
     const key = StorageManager.getKey(videoId, scriptType);
 
     if (!this.pendingSaves.has(key)) {
-      this.pendingSaves.set(key, []);
+      this.pendingSaves.set(key, { cues: [], videoTitle: videoTitle });
     }
-    this.pendingSaves.get(key).push(cue);
+    const record = this.pendingSaves.get(key);
+    record.cues.push(cue);
+    if (videoTitle && !record.videoTitle) {
+      record.videoTitle = videoTitle;
+    }
 
-    // Debounce flush to storage (500ms)
+    // Debounce flush to storage (400ms)
     if (this.flushTimers.has(key)) {
       clearTimeout(this.flushTimers.get(key));
     }
 
     const timer = setTimeout(() => {
       this._flushKey(key, videoId, scriptType);
-    }, 500);
+    }, 400);
 
     this.flushTimers.set(key, timer);
   }
 
   async _flushKey(key, videoId, scriptType) {
-    const newCues = this.pendingSaves.get(key) || [];
+    const record = this.pendingSaves.get(key);
     this.pendingSaves.delete(key);
     this.flushTimers.delete(key);
 
-    if (newCues.length === 0) return;
+    if (!record || record.cues.length === 0) return;
+    const { cues: newCues, videoTitle } = record;
 
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
 
     chrome.storage.local.get([key, 'yt_saved_video_index'], (result) => {
       const existing = result[key] || {
         videoId: videoId,
+        videoTitle: videoTitle || `YouTube Video (${videoId})`,
         scriptType: scriptType,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         cues: []
       };
 
+      if (videoTitle) {
+        existing.videoTitle = videoTitle;
+      }
+
       const cueMap = new Map();
-      // Add existing cues
       for (const c of existing.cues) {
         cueMap.set(`${c.startMs}_${c.endMs}`, c);
       }
-      // Merge new cues
       for (const c of newCues) {
         cueMap.set(`${c.startMs}_${c.endMs}`, c);
       }
@@ -101,10 +111,10 @@ class StorageManager {
       existing.cues = mergedCues;
       existing.updatedAt = Date.now();
 
-      // Update index of saved videos
       let index = result.yt_saved_video_index || {};
       index[videoId] = {
         videoId: videoId,
+        videoTitle: existing.videoTitle || `YouTube Video (${videoId})`,
         cueCount: mergedCues.length,
         updatedAt: Date.now()
       };
@@ -112,6 +122,48 @@ class StorageManager {
       chrome.storage.local.set({
         [key]: existing,
         yt_saved_video_index: index
+      });
+    });
+  }
+
+  /**
+   * Deletes an individual subtitle fragment from a video
+   */
+  async deleteCue(videoId, scriptType = 'latin', cueId) {
+    if (!videoId || !cueId) return [];
+    const key = StorageManager.getKey(videoId, scriptType);
+
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve([]);
+        return;
+      }
+
+      chrome.storage.local.get([key, 'yt_saved_video_index'], (result) => {
+        if (!result || !result[key]) {
+          resolve([]);
+          return;
+        }
+
+        const data = result[key];
+        data.cues = (data.cues || []).filter(c => `${c.startMs}_${c.endMs}` !== cueId && c.id !== cueId);
+        data.updatedAt = Date.now();
+
+        let index = result.yt_saved_video_index || {};
+        if (data.cues.length > 0) {
+          index[videoId] = {
+            ...index[videoId],
+            cueCount: data.cues.length,
+            updatedAt: Date.now()
+          };
+        } else {
+          delete index[videoId];
+        }
+
+        chrome.storage.local.set({
+          [key]: data,
+          yt_saved_video_index: index
+        }, () => resolve(data.cues));
       });
     });
   }
@@ -155,6 +207,24 @@ class StorageManager {
         });
       });
     });
+  }
+
+  /**
+   * Exports subtitle track as SRT format
+   */
+  static exportSRT(cues) {
+    const formatSRTTime = (ms) => {
+      const totalSec = Math.floor(ms / 1000);
+      const hours = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+      const secs = String(totalSec % 60).padStart(2, '0');
+      const millis = String(ms % 1000).padStart(3, '0');
+      return `${hours}:${mins}:${secs},${millis}`;
+    };
+
+    return cues.map((cue, idx) => {
+      return `${idx + 1}\n${formatSRTTime(cue.startMs)} --> ${formatSRTTime(cue.endMs)}\n${cue.text}\n`;
+    }).join('\n');
   }
 
   /**

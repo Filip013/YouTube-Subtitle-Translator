@@ -40,6 +40,19 @@
   }
 
   /**
+   * Get clean YouTube video title from DOM
+   */
+  function getVideoTitle() {
+    const titleEl = document.querySelector('h1.ytd-watch-metadata yt-formatted-string') ||
+                    document.querySelector('#title h1 yt-formatted-string') ||
+                    document.querySelector('h1.title');
+    if (titleEl && titleEl.textContent.trim()) {
+      return titleEl.textContent.trim();
+    }
+    return document.title.replace(' - YouTube', '').trim();
+  }
+
+  /**
    * Initialize core components
    */
   async function init() {
@@ -85,9 +98,17 @@
     audioCapture = new AudioCaptureEngine({
       vadProcessor: vadProcessor,
       onPCMFrame: (pcmFrame) => {
-        if (config.enabled && config.apiKey && geminiLiveClient) {
-          geminiLiveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
+        if (!config.enabled || !config.apiKey || !geminiLiveClient) return;
+
+        const currentTimeMs = Math.round(pcmFrame.videoTimeSec * 1000);
+
+        // SKIPPING ALREADY SUBTITLED SECTIONS:
+        // If a subtitle already exists at this timestamp, do NOT send audio to LLM.
+        if (subtitleRenderer && subtitleRenderer.hasCueAtTime(currentTimeMs)) {
+          return;
         }
+
+        geminiLiveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
       }
     });
 
@@ -133,6 +154,19 @@
       }
     });
 
+    // Listen for message actions (e.g. clear video subtitles)
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'clearActiveVideoSubtitles' && currentVideoId) {
+        if (storageManager) {
+          storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
+            if (subtitleRenderer) subtitleRenderer.clear();
+            sendResponse({ success: true });
+          });
+          return true;
+        }
+      }
+    });
+
     // Attach to current page video
     checkAndAttachPlayer();
   }
@@ -169,9 +203,10 @@
     // Render subtitle immediately on screen
     subtitleRenderer.addCue(cue);
 
-    // Save final completed sentences into persistent memory
+    // Save final completed sentences into persistent memory with video title
     if (subtitleData.isFinal && storageManager) {
-      storageManager.saveCue(currentVideoId, config.scriptType, cue);
+      const title = getVideoTitle();
+      storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
     }
   }
 

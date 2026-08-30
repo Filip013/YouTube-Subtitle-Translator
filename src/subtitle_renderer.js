@@ -88,7 +88,7 @@ class SubtitleRenderer {
       endMs: cue.endMs
     };
 
-    // Remove any existing cue with the same ID or overlapping range
+    // Remove any existing cue with identical ID or overlapping start range
     this.cues = this.cues.filter(c => c.id !== newCue.id);
     this.cues.push(newCue);
 
@@ -97,7 +97,37 @@ class SubtitleRenderer {
   }
 
   /**
-   * Sets the translating status indicator (e.g. subtle pulsing dot)
+   * Removes a specific cue by ID
+   */
+  removeCue(cueId) {
+    this.cues = this.cues.filter(c => c.id !== cueId);
+    if (this.currentCue && this.currentCue.id === cueId) {
+      this.currentCue = null;
+      if (this.textElement) {
+        this.textElement.textContent = '';
+        this.textElement.classList.remove('visible');
+      }
+    }
+  }
+
+  /**
+   * Checks if a subtitle cue already covers the given timestamp
+   * @param {number} currentTimeMs 
+   * @returns {boolean}
+   */
+  hasCueAtTime(currentTimeMs) {
+    return this.cues.some(c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs);
+  }
+
+  /**
+   * Returns current list of cues
+   */
+  getCues() {
+    return [...this.cues];
+  }
+
+  /**
+   * Sets the translating status indicator
    */
   setStatus(status) {
     if (!this.statusElement) return;
@@ -128,8 +158,6 @@ class SubtitleRenderer {
   _renderAtTime(currentTimeMs) {
     if (!this.textElement) return;
 
-    // Find the cue that spans the current time
-    // Adding a 250ms grace margin so rapid pauses don't cause flicker
     const activeCue = this.cues.find(
       c => currentTimeMs >= c.startMs && currentTimeMs <= c.endMs + 250
     );
@@ -149,9 +177,6 @@ class SubtitleRenderer {
     }
   }
 
-  /**
-   * Toggle enabled state
-   */
   setEnabled(enabled) {
     this.isEnabled = enabled;
     if (this.container) {
@@ -162,9 +187,6 @@ class SubtitleRenderer {
     }
   }
 
-  /**
-   * Clears all cues (e.g. on new video load)
-   */
   clear() {
     this.cues = [];
     this.currentCue = null;

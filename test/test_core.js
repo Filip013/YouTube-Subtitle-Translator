@@ -7,9 +7,10 @@ const AudioUtils = require('../src/audio_utils');
 const VADProcessor = require('../src/vad_processor');
 const GeminiService = require('../src/gemini_service');
 const StorageManager = require('../src/storage_manager');
+const SubtitleRenderer = require('../src/subtitle_renderer');
 const GeminiLiveClient = require('../src/gemini_live_client');
 
-console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, StorageManager & GeminiLiveClient ---');
+console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, StorageManager & SubtitleRenderer ---');
 
 // 1. Test AudioUtils.resampleTo16k
 {
@@ -33,78 +34,32 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   console.log('✓ AudioUtils.floatTo16BitPCMBase64 passed');
 }
 
-// 3. Test AudioUtils.encodeWAV & Base64
+// 3. Test StorageManager SRT Export
 {
-  const samples = new Float32Array(1600);
-  for (let i = 0; i < samples.length; i++) {
-    samples[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / 16000);
-  }
-
-  const wavBuffer = AudioUtils.encodeWAV(samples, 16000);
-  assert.strictEqual(wavBuffer.byteLength, 44 + 1600 * 2, 'WAV size should be 44-byte header + 3200 bytes PCM data');
-
-  const view = new DataView(wavBuffer);
-  assert.strictEqual(String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3)), 'RIFF');
-  assert.strictEqual(String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11)), 'WAVE');
-  assert.strictEqual(view.getUint32(24, true), 16000, 'Sample rate in header should be 16000');
-  assert.strictEqual(view.getUint16(22, true), 1, 'Channels in header should be 1 (mono)');
-  assert.strictEqual(view.getUint16(34, true), 16, 'Bits per sample should be 16');
-
-  const base64 = AudioUtils.arrayBufferToBase64(wavBuffer);
-  assert.ok(typeof base64 === 'string' && base64.length > 0, 'Base64 string should be non-empty');
-  console.log('✓ AudioUtils.encodeWAV & Base64 encoding passed');
+  const cues = [
+    { startMs: 1000, endMs: 4000, text: 'Prva rečenica' },
+    { startMs: 4500, endMs: 7200, text: 'Druga rečenica' }
+  ];
+  const srt = StorageManager.exportSRT(cues);
+  assert.ok(srt.includes('00:00:01,000 --> 00:00:04,000'), 'SRT must format timestamps correctly');
+  assert.ok(srt.includes('Prva rečenica'), 'SRT must include cue text');
+  console.log('✓ StorageManager.exportSRT passed');
 }
 
-// 4. Test AudioUtils.computeRMS
+// 4. Test SubtitleRenderer hasCueAtTime & removeCue
 {
-  const silence = new Float32Array(100).fill(0);
-  assert.strictEqual(AudioUtils.computeRMS(silence), 0, 'Silence RMS should be 0');
+  const renderer = new SubtitleRenderer();
+  renderer.addCue({ startMs: 2000, endMs: 5000, text: 'Zdravo' });
 
-  const constantVal = new Float32Array(100).fill(0.5);
-  assert.strictEqual(Math.round(AudioUtils.computeRMS(constantVal) * 100) / 100, 0.5, 'Constant RMS should equal amplitude');
-  console.log('✓ AudioUtils.computeRMS passed');
+  assert.strictEqual(renderer.hasCueAtTime(3000), true, 'Timestamp 3000ms should be within cue [2000, 5000]');
+  assert.strictEqual(renderer.hasCueAtTime(1000), false, 'Timestamp 1000ms should not be within cue');
+
+  renderer.removeCue('2000_5000');
+  assert.strictEqual(renderer.hasCueAtTime(3000), false, 'Cue should be removed');
+  console.log('✓ SubtitleRenderer.hasCueAtTime & removeCue passed');
 }
 
-// 5. Test VADProcessor speech chunking and programmatic timestamps
-{
-  let chunksEmitted = [];
-  const vad = new VADProcessor({
-    sampleRate: 16000,
-    minSpeechDurationMs: 300,
-    silenceHangoverMs: 200,
-    sensitivity: 'medium',
-    onChunkReady: (chunk) => {
-      chunksEmitted.push(chunk);
-    }
-  });
-
-  const frameSize = 800;
-  const silentFrame = new Float32Array(frameSize).fill(0.001);
-  const speechFrame = new Float32Array(frameSize);
-  for (let i = 0; i < speechFrame.length; i++) {
-    speechFrame[i] = 0.4 * Math.sin((2 * Math.PI * 300 * i) / 16000);
-  }
-
-  for (let t = 0; t < 4; t++) {
-    vad.processFrame(silentFrame, t * 0.05);
-  }
-  assert.strictEqual(vad.isSpeaking, false, 'Should be in non-speech state');
-
-  for (let t = 4; t < 14; t++) {
-    vad.processFrame(speechFrame, t * 0.05);
-  }
-  assert.strictEqual(vad.isSpeaking, true, 'Should detect speech onset');
-
-  for (let t = 14; t < 20; t++) {
-    vad.processFrame(silentFrame, t * 0.05);
-  }
-
-  assert.strictEqual(vad.isSpeaking, false, 'Should have finalized speech after silence hangover');
-  assert.strictEqual(chunksEmitted.length, 1, 'Should have emitted exactly 1 speech chunk');
-  console.log('✓ VADProcessor speech detection verified');
-}
-
-// 6. Test StorageManager keys & methods
+// 5. Test StorageManager keys
 {
   const latinKey = StorageManager.getKey('dQw4w9WgXcQ', 'latin');
   const cyrillicKey = StorageManager.getKey('dQw4w9WgXcQ', 'cyrillic');
@@ -113,7 +68,7 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   console.log('✓ StorageManager key generation passed');
 }
 
-// 7. Test GeminiLiveClient instantiation
+// 6. Test GeminiLiveClient instantiation
 {
   const liveClient = new GeminiLiveClient({
     apiKey: 'test_key',

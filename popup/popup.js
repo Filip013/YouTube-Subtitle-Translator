@@ -13,9 +13,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnOpenOptions = document.getElementById('btn-open-options');
   const testResultBox = document.getElementById('test-result-box');
   const memoryDesc = document.getElementById('memory-subtitle-count');
+  const btnClearCurrentVideo = document.getElementById('btn-clear-current-video');
 
   const storageManager = new StorageManager();
   let currentScriptType = 'latin';
+  let activeVideoId = null;
 
   const defaultSettings = {
     enabled: true,
@@ -60,20 +62,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs && tabs[0] && tabs[0].url && tabs[0].url.includes('youtube.com/watch')) {
         const url = new URL(tabs[0].url);
-        const videoId = url.searchParams.get('v');
-        if (videoId) {
-          const cues = await storageManager.loadSubtitles(videoId, currentScriptType);
+        activeVideoId = url.searchParams.get('v');
+        if (activeVideoId) {
+          const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
           if (cues && cues.length > 0) {
             memoryDesc.textContent = `✨ ${cues.length} subtitle cues remembered`;
+            btnClearCurrentVideo.classList.remove('hidden');
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
+            btnClearCurrentVideo.classList.add('hidden');
           }
           return;
         }
       }
+      activeVideoId = null;
       memoryDesc.textContent = 'Ready on YouTube video pages';
+      btnClearCurrentVideo.classList.add('hidden');
     });
   }
+
+  // Clear current video subtitles
+  btnClearCurrentVideo.addEventListener('click', async () => {
+    if (!activeVideoId) return;
+
+    if (confirm('Delete all remembered subtitles for this video?')) {
+      await storageManager.deleteVideoSubtitles(activeVideoId);
+
+      // Send message to active tab to clear subtitle overlay immediately
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'clearActiveVideoSubtitles' }, () => {});
+        }
+      });
+
+      checkActiveTabMemory();
+    }
+  });
 
   // Toggle enable/disable
   toggleEnabled.addEventListener('change', () => {
