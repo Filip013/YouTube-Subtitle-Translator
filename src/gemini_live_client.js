@@ -1,13 +1,13 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
- * Connects to Google's Multimodal Live API (gemini-3.1-live-preview)
+ * Connects to Google's Multimodal Live API (gemini-3.1-flash-live-preview)
  * Streams live audio and translates directly into Serbian subtitles in real-time.
  */
 
 class GeminiLiveClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-3.1-live-preview';
+    this.model = config.model || 'gemini-3.1-flash-live-preview';
     this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
     this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 

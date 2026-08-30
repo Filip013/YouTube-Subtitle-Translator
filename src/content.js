@@ -1,6 +1,6 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator
- * Flash Live Translation Mode (gemini-3.1-live-preview over WebSocket)
+ * Flash Live Translation Mode (gemini-3.1-flash-live-preview over WebSocket)
  * Zero REST API quota consumed - Streams live audio and generates Serbian subtitles in real time.
  */
 
@@ -18,7 +18,7 @@
   // Real-time telemetry state
   const diagnostics = {
     videoId: null,
-    mode: 'Live Translate (gemini-3.1-live-preview)',
+    mode: 'Live Translate (gemini-3.1-flash-live-preview)',
     status: 'Initializing...',
     audioLevel: 0,
     framesSent: 0,
@@ -33,7 +33,7 @@
   const config = {
     enabled: true,
     apiKey: '',
-    liveModel: 'gemini-3.1-live-preview',
+    liveModel: 'gemini-3.1-flash-live-preview',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
     sensitivity: 'medium',
