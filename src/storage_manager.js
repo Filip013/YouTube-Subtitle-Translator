@@ -1,6 +1,6 @@
 /**
  * Storage Manager for YouTube Subtitle Translator
- * Immediate, rock-solid persistence of video subtitle tracks and fragments in chrome.storage.local
+ * Rock-solid persistence of video subtitle tracks and fragments in chrome.storage.local
  */
 
 class StorageManager {
@@ -9,12 +9,11 @@ class StorageManager {
   }
 
   /**
-   * Generates a storage key for a video and script type
+   * Generates a unified storage key for a video
    */
-  static getKey(videoId, scriptType = 'latin') {
+  static getKey(videoId) {
     const cleanId = String(videoId || '').trim();
-    const cleanScript = String(scriptType || 'latin').toLowerCase().trim();
-    return `yt_subs_${cleanId}_${cleanScript}`;
+    return `yt_subs_${cleanId}`;
   }
 
   /**
@@ -39,16 +38,16 @@ class StorageManager {
   }
 
   /**
-   * Loads all saved subtitle cues for a specific video and script
+   * Loads all saved subtitle cues for a specific video
    * @param {string} videoId 
-   * @param {string} scriptType 
+   * @param {string} [scriptType]
    * @returns {Promise<Array<{id: string, text: string, originalText?: string, startMs: number, endMs: number}>>}
    */
   async loadSubtitles(videoId, scriptType = 'latin') {
     const cleanId = String(videoId || '').trim();
     if (!cleanId) return [];
 
-    const key = StorageManager.getKey(cleanId, scriptType);
+    const key = StorageManager.getKey(cleanId);
 
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
@@ -57,15 +56,25 @@ class StorageManager {
         return;
       }
 
-      chrome.storage.local.get([key], (result) => {
-        if (result && result[key] && Array.isArray(result[key].cues)) {
-          this.inMemoryCache.set(key, result[key].cues);
-          console.log(`[StorageManager] Successfully loaded ${result[key].cues.length} cues for [${key}]`);
-          resolve(result[key].cues);
+      // Check unified key and legacy keys for backwards compatibility
+      const legacyLatinKey = `yt_subs_${cleanId}_latin`;
+      const legacyCyrillicKey = `yt_subs_${cleanId}_cyrillic`;
+
+      chrome.storage.local.get([key, legacyLatinKey, legacyCyrillicKey], (result) => {
+        let cues = [];
+        if (result && result[key] && Array.isArray(result[key].cues) && result[key].cues.length > 0) {
+          cues = result[key].cues;
+        } else if (result && result[legacyLatinKey] && Array.isArray(result[legacyLatinKey].cues)) {
+          cues = result[legacyLatinKey].cues;
+        } else if (result && result[legacyCyrillicKey] && Array.isArray(result[legacyCyrillicKey].cues)) {
+          cues = result[legacyCyrillicKey].cues;
         } else {
-          const cached = this.inMemoryCache.get(key) || [];
-          resolve(cached);
+          cues = this.inMemoryCache.get(key) || [];
         }
+
+        this.inMemoryCache.set(key, cues);
+        console.log(`[StorageManager] Loaded ${cues.length} saved cues for video [${cleanId}]`);
+        resolve(cues);
       });
     });
   }
@@ -80,12 +89,12 @@ class StorageManager {
    */
   async saveCue(videoId, scriptType = 'latin', cue, videoTitle = '') {
     const cleanId = String(videoId || '').trim();
-    if (!cleanId || !cue || !cue.text) return;
+    if (!cleanId || !cue || (!cue.text && !cue.originalText)) return;
 
-    const key = StorageManager.getKey(cleanId, scriptType);
+    const key = StorageManager.getKey(cleanId);
     const cueItem = {
       id: `${cue.startMs}_${cue.endMs}`,
-      text: cue.text.trim(),
+      text: (cue.text || cue.originalText || '').trim(),
       originalText: cue.originalText ? cue.originalText.trim() : '',
       startMs: cue.startMs,
       endMs: cue.endMs
@@ -108,7 +117,7 @@ class StorageManager {
         const existingRecord = result[key] || {
           videoId: cleanId,
           videoTitle: videoTitle || `YouTube Video (${cleanId})`,
-          scriptType: scriptType,
+          scriptType: scriptType || 'latin',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           cues: []
@@ -158,7 +167,7 @@ class StorageManager {
   async deleteCue(videoId, scriptType = 'latin', cueId) {
     const cleanId = String(videoId || '').trim();
     if (!cleanId || !cueId) return [];
-    const key = StorageManager.getKey(cleanId, scriptType);
+    const key = StorageManager.getKey(cleanId);
 
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
@@ -226,17 +235,17 @@ class StorageManager {
         return;
       }
 
-      const latinKey = StorageManager.getKey(cleanId, 'latin');
-      const cyrillicKey = StorageManager.getKey(cleanId, 'cyrillic');
+      const key = StorageManager.getKey(cleanId);
+      const legacyLatinKey = `yt_subs_${cleanId}_latin`;
+      const legacyCyrillicKey = `yt_subs_${cleanId}_cyrillic`;
 
       chrome.storage.local.get(['yt_saved_video_index'], (result) => {
         let index = result.yt_saved_video_index || {};
         delete index[cleanId];
 
-        chrome.storage.local.remove([latinKey, cyrillicKey], () => {
+        chrome.storage.local.remove([key, legacyLatinKey, legacyCyrillicKey], () => {
           chrome.storage.local.set({ yt_saved_video_index: index }, () => {
-            this.inMemoryCache.delete(latinKey);
-            this.inMemoryCache.delete(cyrillicKey);
+            this.inMemoryCache.delete(key);
             resolve();
           });
         });

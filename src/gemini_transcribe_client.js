@@ -1,13 +1,13 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
- * Connects to Google's Multimodal Live API over WebSockets (gemini-2.0-flash-exp / gemini-3.1-flash-live)
+ * Connects to Google's gemini-3.5-transcribe-live over WebSockets
  * with robust auto-reconnection, Blob decoding, and live diagnostics reporting.
  */
 
 class GeminiTranscribeClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-2.0-flash-exp';
+    this.model = config.model || 'gemini-3.5-transcribe-live';
 
     this.ws = null;
     this.isConnected = false;
@@ -66,9 +66,8 @@ class GeminiTranscribeClient {
     this.isConnecting = true;
     this.isSetupComplete = false;
     this.lastError = null;
-    this._emitStatus('connecting', 'Connecting to Gemini Live WebSocket...');
+    this._emitStatus('connecting', 'Connecting to Live Transcribe WebSocket...');
 
-    // Clean model name (ensure models/ prefix is handled properly in setup)
     const cleanModel = this.model.replace(/^models\//, '');
     const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.apiKey}`;
 
@@ -80,7 +79,7 @@ class GeminiTranscribeClient {
         this.isConnecting = false;
         this.lastError = null;
         this._sendSetupHandshake(cleanModel);
-        this._emitStatus('connected', `Connected to Gemini Live (${cleanModel})`);
+        this._emitStatus('connected', `Connected (${cleanModel})`);
         console.log('[GeminiTranscribe] WebSocket connected with model:', cleanModel);
       };
 
@@ -103,7 +102,7 @@ class GeminiTranscribeClient {
         if (event.reason) {
           this.lastError = `Closed: ${event.reason} (code ${event.code})`;
         } else if (event.code === 1006) {
-          this.lastError = 'Connection closed abruptly (code 1006). Reconnecting...';
+          this.lastError = 'Connection closed (code 1006). Reconnecting...';
         }
 
         this.flush();
@@ -134,21 +133,11 @@ class GeminiTranscribeClient {
   _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const systemPrompt = `You are a real-time speech-to-text transcriber.
-Listen to the live audio stream and transcribe spoken words into clean, punctuated English.
-Output ONLY the transcribed English text. Do not output filler, conversational replies, or timestamps.`;
-
     const setupPayload = {
       setup: {
         model: `models/${cleanModel}`,
         generationConfig: {
-          responseModalities: ['TEXT'],
-          temperature: 0.1
-        },
-        systemInstruction: {
-          parts: [
-            { text: systemPrompt }
-          ]
+          responseModalities: ['TEXT']
         }
       }
     };

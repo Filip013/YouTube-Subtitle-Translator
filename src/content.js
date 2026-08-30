@@ -1,6 +1,6 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator (Two-Stage Pipeline)
- * Stage 1: gemini-2.0-flash-exp (Live ASR over WebSockets)
+ * Stage 1: gemini-3.5-transcribe-live (Live ASR over WebSockets)
  * Stage 2: gemini-3.1-flash-lite (Fast Text-to-Text Serbian Translation)
  */
 
@@ -32,7 +32,7 @@
   const config = {
     enabled: true,
     apiKey: '',
-    transcribeModel: 'gemini-2.0-flash-exp',
+    transcribeModel: 'gemini-3.5-transcribe-live',
     translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
@@ -154,7 +154,7 @@
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Extension initialized.');
+    console.log('[GeminiSubtitles] Extension initialized with Live Transcribe:', config.transcribeModel);
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -261,34 +261,48 @@
       subtitleRenderer.setLiveCue(chunkData.text, chunkData.startMs, chunkData.endMs);
       publishDiagnostics({ lastTranscribed: chunkData.text });
     } else {
-      // Stage 2: Translate clean English sentence to Serbian via Flash Lite
       const englishText = chunkData.text;
+      const title = getVideoTitle();
+
+      // 1. Immediately save the transcript cue so progress is NEVER lost!
+      const initialCue = {
+        text: englishText,
+        originalText: englishText,
+        startMs: chunkData.startMs,
+        endMs: chunkData.endMs
+      };
+      subtitleRenderer.addCue(initialCue);
+      if (storageManager) {
+        await storageManager.saveCue(currentVideoId, config.scriptType, initialCue, title);
+      }
+
       publishDiagnostics({
         status: `Translating: "${englishText.substring(0, 30)}..."`,
-        lastTranscribed: englishText
+        lastTranscribed: englishText,
+        cuesSaved: subtitleRenderer.getCues().length
       });
 
+      // 2. Stage 2: Translate English sentence to natural Serbian via Flash Lite
       const serbianText = await textTranslator.translateText(englishText);
 
-      if (serbianText) {
-        const cue = {
+      if (serbianText && serbianText !== englishText) {
+        const translatedCue = {
           text: serbianText,
           originalText: englishText,
           startMs: chunkData.startMs,
           endMs: chunkData.endMs
         };
 
-        subtitleRenderer.addCue(cue);
+        subtitleRenderer.addCue(translatedCue);
 
         if (storageManager) {
-          const title = getVideoTitle();
-          await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+          await storageManager.saveCue(currentVideoId, config.scriptType, translatedCue, title);
           publishDiagnostics({
             status: 'Fragment translated & saved!',
             lastTranslated: serbianText,
             cuesSaved: subtitleRenderer.getCues().length
           });
-          console.log(`[GeminiSubtitles] Saved fragment: "${englishText}" -> "${serbianText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
+          console.log(`[GeminiSubtitles] Saved translated fragment: "${englishText}" -> "${serbianText}" [${translatedCue.startMs}ms - ${translatedCue.endMs}ms]`);
         }
       }
     }
