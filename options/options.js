@@ -1,12 +1,18 @@
 /**
- * Options Script for YouTube Subtitle Translator
- * Handles Two-Stage Pipeline settings, live preview, and Subtitle & Fragment Manager.
+ * Options Page Script for YouTube Subtitle Translator
+ * Full configuration for Two-Stage AI Pipeline, VAD tuning, and Subtitle Library Manager
  */
 
-document.addEventListener('DOMContentLoaded', () => {
-  // DOM Elements
+document.addEventListener('DOMContentLoaded', async () => {
+  // Navigation
+  const navItems = document.querySelectorAll('.nav-item');
+  const sections = document.querySelectorAll('.card-section');
+  const btnSaveAll = document.getElementById('btn-save-all');
+  const saveStatusMsg = document.getElementById('save-status-msg');
+
+  // Form Controls
   const apiKeyInput = document.getElementById('api-key');
-  const btnToggleKeyVisibility = document.getElementById('btn-toggle-key-visibility');
+  const btnToggleKey = document.getElementById('btn-toggle-key-visibility');
   const btnTestApi = document.getElementById('btn-test-api');
   const apiTestFeedback = document.getElementById('api-test-feedback');
 
@@ -14,8 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const translateModelIdInput = document.getElementById('translate-model-id');
 
   const scriptTypeRadios = document.querySelectorAll('input[name="scriptType"]');
-  const speakerGenderSelect = document.getElementById('speaker-gender-select');
-  const checkDualSubtitles = document.getElementById('check-dual-subtitles');
+  const speakerGenderSelect = document.getElementById('speaker-gender');
 
   const vadSensitivitySelect = document.getElementById('vad-sensitivity');
   const sliderSilence = document.getElementById('slider-silence');
@@ -23,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const sliderMaxDuration = document.getElementById('slider-max-duration');
   const valMaxDuration = document.getElementById('val-max-duration');
 
+  const checkDualSubtitles = document.getElementById('check-dual-subtitles');
   const sliderFontSize = document.getElementById('slider-font-size');
   const valFontSize = document.getElementById('val-font-size');
   const sliderBottomOffset = document.getElementById('slider-bottom-offset');
@@ -30,13 +36,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const colorFont = document.getElementById('color-font');
   const colorBg = document.getElementById('color-bg');
 
-  const previewWrapper = document.getElementById('preview-wrapper');
+  // Preview elements
   const previewOriginal = document.getElementById('preview-original');
-  const previewSubtitle = document.getElementById('preview-subtitle');
+  const previewTranslated = document.getElementById('preview-translated');
+  const previewSubtitleBox = document.getElementById('preview-subtitle-box');
 
-  const btnSaveAll = document.getElementById('btn-save-all');
-  const saveStatusMsg = document.getElementById('save-status-msg');
-  const btnClearCache = document.getElementById('btn-clear-cache');
+  // Video Library
+  const searchInput = document.getElementById('search-saved-videos');
+  const btnClearAllLibrary = document.getElementById('btn-clear-all-library');
   const videoLibraryContainer = document.getElementById('video-library-container');
 
   // Modal Elements
@@ -96,8 +103,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sliderBottomOffset.value = items.bottomOffset || 12;
     valBottomOffset.textContent = sliderBottomOffset.value;
 
-    colorFont.value = items.fontColor || '#ffffff';
-    colorBg.value = items.backgroundColor || '#000000';
+    colorFont.value = (typeof items.fontColor === 'string' && items.fontColor.startsWith('#')) ? items.fontColor : '#ffffff';
+    colorBg.value = (typeof items.backgroundColor === 'string' && items.backgroundColor.startsWith('#')) ? items.backgroundColor : '#000000';
 
     updateLivePreview();
     renderVideoLibrary();
@@ -109,66 +116,62 @@ document.addEventListener('DOMContentLoaded', () => {
       const videos = await storageManager.getAllSavedVideos();
       if (!videos || videos.length === 0) {
         videoLibraryContainer.innerHTML = `
-          <div style="padding: 20px; text-align: center; color: var(--text-muted);">
-            No videos currently saved in memory. Watch any YouTube video with subtitles enabled to start caching!
-          </div>
-        `;
+          <div class="empty-state">
+            <span class="empty-icon">📭</span>
+            <h4>No Saved Subtitles Yet</h4>
+            <p>Subtitles generated on YouTube will appear here and persist across sessions.</p>
+          </div>`;
         return;
       }
 
       videoLibraryContainer.innerHTML = '';
-
       videos.forEach(v => {
-        const card = document.createElement('div');
-        card.className = 'video-entry-card';
-
-        const updatedDate = v.updatedAt ? new Date(v.updatedAt).toLocaleDateString() : 'Recently';
-
-        card.innerHTML = `
-          <div class="video-entry-info">
-            <div class="video-entry-title">${escapeHTML(v.videoTitle || 'YouTube Video')}</div>
-            <div class="video-entry-meta">
-              ID: <code>${v.videoId}</code> • <strong>${v.cueCount || 0} fragments</strong> • Saved: ${updatedDate}
+        const item = document.createElement('div');
+        item.className = 'library-item';
+        item.innerHTML = `
+          <div class="library-info">
+            <div class="library-title" title="${v.videoTitle}">${v.videoTitle}</div>
+            <div class="library-meta">
+              <span>🆔 ${v.videoId}</span>
+              <span>🧩 ${v.cueCount || 0} fragments</span>
+              <span>🕒 ${new Date(v.updatedAt || Date.now()).toLocaleDateString()}</span>
             </div>
           </div>
-          <div class="video-entry-actions">
-            <button type="button" class="btn-outline btn-view-fragments" data-id="${v.videoId}" data-title="${escapeHTML(v.videoTitle || '')}">
-              👁️ View Fragments
+          <div class="library-actions">
+            <button type="button" class="btn-outline btn-view-cues" data-video-id="${v.videoId}" data-video-title="${v.videoTitle}">
+              🔍 View & Edit
             </button>
-            <button type="button" class="btn-danger-outline btn-delete-video" data-id="${v.videoId}">
+            <button type="button" class="btn-danger-outline btn-del-video" data-video-id="${v.videoId}">
               🗑️
             </button>
           </div>
         `;
-
-        videoLibraryContainer.appendChild(card);
+        videoLibraryContainer.appendChild(item);
       });
 
-      // Bind action buttons
-      document.querySelectorAll('.btn-view-fragments').forEach(btn => {
-        btn.addEventListener('click', () => {
-          openFragmentModal(btn.dataset.id, btn.dataset.title);
-        });
+      // Hook view & delete buttons
+      document.querySelectorAll('.btn-view-cues').forEach(btn => {
+        btn.addEventListener('click', () => openFragmentModal(btn.dataset.videoId, btn.dataset.videoTitle));
       });
 
-      document.querySelectorAll('.btn-delete-video').forEach(btn => {
+      document.querySelectorAll('.btn-del-video').forEach(btn => {
         btn.addEventListener('click', async () => {
-          if (confirm('Delete all remembered subtitles for this video?')) {
-            await storageManager.deleteVideoSubtitles(btn.dataset.id);
+          const vId = btn.dataset.videoId;
+          if (confirm(`Delete all saved subtitles for video (${vId})?`)) {
+            await storageManager.deleteVideoSubtitles(vId);
             renderVideoLibrary();
           }
         });
       });
-    } catch (err) {
-      videoLibraryContainer.textContent = 'Could not load video memory library.';
+    } catch (e) {
+      console.error('Error rendering library:', e);
     }
   }
 
-  // Open Fragment Modal
-  async function openFragmentModal(videoId, title) {
+  // Open modal with fragment editor
+  async function openFragmentModal(videoId, videoTitle) {
     activeModalVideoId = videoId;
-    modalVideoTitle.textContent = title || `Subtitles for (${videoId})`;
-    modalFragmentList.innerHTML = '<div style="padding: 10px; color: var(--text-muted);">Loading fragments...</div>';
+    modalVideoTitle.textContent = videoTitle || `YouTube Video (${videoId})`;
     fragmentModal.classList.remove('hidden');
 
     activeModalCues = await storageManager.loadSubtitles(videoId, currentScriptType);
@@ -177,41 +180,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderModalFragments() {
     if (!activeModalCues || activeModalCues.length === 0) {
-      modalFragmentList.innerHTML = '<div style="padding: 15px; color: var(--text-muted); text-align: center;">No subtitle fragments for this video.</div>';
+      modalFragmentList.innerHTML = '<p class="text-muted" style="padding: 20px; text-align: center;">No fragments found for this video.</p>';
       return;
     }
 
     modalFragmentList.innerHTML = '';
+    activeModalCues.forEach((cue, index) => {
+      const row = document.createElement('div');
+      row.className = 'fragment-row';
+      const cueId = `${cue.startMs}_${cue.endMs}`;
+      const timeStr = `${formatTime(cue.startMs)} ➔ ${formatTime(cue.endMs)}`;
 
-    activeModalCues.forEach((cue) => {
-      const item = document.createElement('div');
-      item.className = 'fragment-item';
-
-      const formatTime = (ms) => {
-        const totalSec = Math.floor(ms / 1000);
-        const mins = String(Math.floor(totalSec / 60)).padStart(2, '0');
-        const secs = String(totalSec % 60).padStart(2, '0');
-        return `${mins}:${secs}`;
-      };
-
-      const originalHtml = cue.originalText ? `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">EN: ${escapeHTML(cue.originalText)}</div>` : '';
-
-      item.innerHTML = `
-        <div class="fragment-time">${formatTime(cue.startMs)} - ${formatTime(cue.endMs)}</div>
-        <div class="fragment-text">
-          ${originalHtml}
-          <strong>${escapeHTML(cue.text)}</strong>
+      row.innerHTML = `
+        <span class="frag-time">${timeStr}</span>
+        <div class="frag-text">
+          <div class="frag-serbian">${cue.text}</div>
+          ${cue.originalText ? `<div class="frag-original">${cue.originalText}</div>` : ''}
         </div>
-        <button type="button" class="fragment-delete-btn" data-id="${cue.startMs}_${cue.endMs}" title="Delete this fragment">❌</button>
+        <button type="button" class="btn-danger-icon btn-del-cue" data-cue-id="${cueId}">✕</button>
       `;
-
-      modalFragmentList.appendChild(item);
+      modalFragmentList.appendChild(row);
     });
 
-    // Bind individual delete buttons
-    document.querySelectorAll('.fragment-delete-btn').forEach(btn => {
+    // Individual delete buttons
+    document.querySelectorAll('.btn-del-cue').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const cueId = btn.dataset.id;
+        const cueId = btn.dataset.cueId;
         activeModalCues = await storageManager.deleteCue(activeModalVideoId, currentScriptType, cueId);
         renderModalFragments();
         renderVideoLibrary();
@@ -219,63 +213,86 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Close Modal
+  // Close modal
   modalBtnClose.addEventListener('click', () => {
     fragmentModal.classList.add('hidden');
     activeModalVideoId = null;
   });
 
-  // Export as SRT
+  // Export SRT
   modalBtnExport.addEventListener('click', () => {
-    if (!activeModalCues || activeModalCues.length === 0) {
-      alert('No subtitles to export.');
-      return;
-    }
-
+    if (!activeModalCues || activeModalCues.length === 0) return;
     const srtContent = StorageManager.exportSRT(activeModalCues);
     const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${activeModalVideoId}_subtitles_serbian.srt`;
-    document.body.appendChild(a);
+    a.download = `subtitles_${activeModalVideoId}.srt`;
     a.click();
-    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   });
 
-  // Delete All for this Video from Modal
+  // Delete all in modal
   modalBtnDeleteAll.addEventListener('click', async () => {
-    if (activeModalVideoId && confirm('Delete all subtitles for this video?')) {
+    if (confirm('Delete all saved subtitles for this video?')) {
       await storageManager.deleteVideoSubtitles(activeModalVideoId);
       fragmentModal.classList.add('hidden');
       renderVideoLibrary();
     }
   });
 
-  function escapeHTML(str) {
-    return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  // Toggle API Key visibility
-  btnToggleKeyVisibility.addEventListener('click', () => {
-    if (apiKeyInput.type === 'password') {
-      apiKeyInput.type = 'text';
-      btnToggleKeyVisibility.textContent = '🔒';
-    } else {
-      apiKeyInput.type = 'password';
-      btnToggleKeyVisibility.textContent = '👁️';
+  // Clear all library
+  btnClearAllLibrary.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to delete ALL saved subtitles across ALL videos?')) {
+      await storageManager.clearAll();
+      renderVideoLibrary();
     }
   });
 
-  // Slider input updates & preview
-  sliderSilence.addEventListener('input', () => {
-    valSilence.textContent = sliderSilence.value;
+  // Save All Settings
+  btnSaveAll.addEventListener('click', () => {
+    let scriptVal = 'latin';
+    scriptTypeRadios.forEach(r => {
+      if (r.checked) scriptVal = r.value;
+    });
+
+    const newSettings = {
+      apiKey: apiKeyInput.value.trim(),
+      transcribeModel: transcribeModelIdInput.value.trim() || 'gemini-3.5-transcribe-live',
+      translateModel: translateModelIdInput.value.trim() || 'gemini-3.1-flash-lite',
+      scriptType: scriptVal,
+      speakerGender: speakerGenderSelect.value,
+      sensitivity: vadSensitivitySelect.value,
+      silenceHangoverMs: parseInt(sliderSilence.value, 10),
+      maxSpeechDurationMs: parseInt(sliderMaxDuration.value, 10),
+      showDualSubtitles: checkDualSubtitles.checked,
+      fontSize: parseInt(sliderFontSize.value, 10),
+      bottomOffset: parseInt(sliderBottomOffset.value, 10),
+      fontColor: colorFont.value,
+      backgroundColor: colorBg.value
+    };
+
+    chrome.storage.sync.set(newSettings, () => {
+      saveStatusMsg.textContent = 'Settings saved successfully!';
+      saveStatusMsg.classList.add('visible');
+      setTimeout(() => {
+        saveStatusMsg.classList.remove('visible');
+      }, 2500);
+    });
   });
 
-  sliderMaxDuration.addEventListener('input', () => {
-    valMaxDuration.textContent = sliderMaxDuration.value;
-  });
+  // Live preview updates
+  function updateLivePreview() {
+    previewSubtitleBox.style.fontSize = `${sliderFontSize.value}px`;
+    previewSubtitleBox.style.color = colorFont.value;
+    previewSubtitleBox.style.backgroundColor = colorBg.value;
+
+    if (checkDualSubtitles.checked) {
+      previewOriginal.style.display = 'block';
+    } else {
+      previewOriginal.style.display = 'none';
+    }
+  }
 
   sliderFontSize.addEventListener('input', () => {
     valFontSize.textContent = sliderFontSize.value;
@@ -284,52 +301,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   sliderBottomOffset.addEventListener('input', () => {
     valBottomOffset.textContent = sliderBottomOffset.value;
-    updateLivePreview();
+  });
+
+  sliderSilence.addEventListener('input', () => {
+    valSilence.textContent = sliderSilence.value;
+  });
+
+  sliderMaxDuration.addEventListener('input', () => {
+    valMaxDuration.textContent = sliderMaxDuration.value;
   });
 
   colorFont.addEventListener('input', updateLivePreview);
   colorBg.addEventListener('input', updateLivePreview);
   checkDualSubtitles.addEventListener('change', updateLivePreview);
 
-  scriptTypeRadios.forEach(radio => {
-    radio.addEventListener('change', () => {
-      currentScriptType = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
-      updateLivePreview();
-      renderVideoLibrary();
-    });
+  // Toggle API key visibility
+  btnToggleKey.addEventListener('click', () => {
+    apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
   });
 
-  function updateLivePreview() {
-    const fontSize = sliderFontSize.value;
-    const bottomOffset = sliderBottomOffset.value;
-    const fontColor = colorFont.value;
-    const bgColor = colorBg.value;
-    const isDual = checkDualSubtitles.checked;
-
-    const selectedScript = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
-    if (selectedScript === 'cyrillic') {
-      previewSubtitle.textContent = 'Ово је пример преведеног титла на српски језик.';
-    } else {
-      previewSubtitle.textContent = 'Ovo je primer prevedenog titla na srpski jezik.';
-    }
-
-    if (isDual) {
-      previewOriginal.classList.remove('hidden');
-    } else {
-      previewOriginal.classList.add('hidden');
-    }
-
-    previewWrapper.style.bottom = `${bottomOffset}%`;
-    previewSubtitle.style.fontSize = `${fontSize}px`;
-    previewSubtitle.style.color = fontColor;
-    previewSubtitle.style.backgroundColor = `${bgColor}c7`;
-  }
-
-  // Test Connection
+  // Test API Key
   btnTestApi.addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
-    const model = translateModelIdInput.value.trim() || 'gemini-3.1-flash-lite';
-
     if (!key) {
       showApiFeedback('Please enter an API key first.', 'error');
       return;
@@ -337,8 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnTestApi.disabled = true;
     btnTestApi.textContent = 'Testing...';
+    hideApiFeedback();
 
-    const result = await GeminiService.testConnection(key, model);
+    const result = await GeminiService.testConnection(key, 'gemini-2.5-flash');
     btnTestApi.disabled = false;
     btnTestApi.textContent = 'Test Connection';
 
@@ -355,39 +349,14 @@ document.addEventListener('DOMContentLoaded', () => {
     apiTestFeedback.classList.remove('hidden');
   }
 
-  // Save all settings
-  btnSaveAll.addEventListener('click', () => {
-    const selectedScript = document.querySelector('input[name="scriptType"]:checked')?.value || 'latin';
-    const settings = {
-      apiKey: apiKeyInput.value.trim(),
-      transcribeModel: transcribeModelIdInput.value.trim() || 'gemini-3.5-transcribe-live',
-      translateModel: translateModelIdInput.value.trim() || 'gemini-3.1-flash-lite',
-      scriptType: selectedScript,
-      speakerGender: speakerGenderSelect.value,
-      showDualSubtitles: checkDualSubtitles.checked,
-      sensitivity: vadSensitivitySelect.value,
-      silenceHangoverMs: parseInt(sliderSilence.value, 10),
-      maxSpeechDurationMs: parseInt(sliderMaxDuration.value, 10),
-      fontSize: parseInt(sliderFontSize.value, 10),
-      bottomOffset: parseInt(sliderBottomOffset.value, 10),
-      fontColor: colorFont.value,
-      backgroundColor: colorBg.value
-    };
+  function hideApiFeedback() {
+    apiTestFeedback.classList.add('hidden');
+  }
 
-    chrome.storage.sync.set(settings, () => {
-      saveStatusMsg.classList.add('visible');
-      setTimeout(() => {
-        saveStatusMsg.classList.remove('visible');
-      }, 2500);
-    });
-  });
-
-  // Clear all videos
-  btnClearCache.addEventListener('click', async () => {
-    if (confirm('Clear all saved video subtitles and cache?')) {
-      await storageManager.clearAll();
-      renderVideoLibrary();
-      alert('All remembered subtitles and cache cleared.');
-    }
-  });
+  function formatTime(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  }
 });

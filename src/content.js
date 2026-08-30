@@ -36,7 +36,7 @@
     sensitivity: 'medium',
     fontSize: 22,
     fontColor: '#ffffff',
-    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    backgroundColor: '#000000',
     bottomOffset: 12
   };
 
@@ -261,6 +261,10 @@
    * Check for YouTube player element and attach capture idempotently
    */
   async function checkAndAttachPlayer() {
+    if (!isInitialized || !subtitleRenderer || !storageManager || !transcribeClient || !audioCapture) {
+      return;
+    }
+
     const videoId = StorageManager.extractVideoId(window.location.href);
     if (!videoId) {
       if (audioCapture) audioCapture.detach();
