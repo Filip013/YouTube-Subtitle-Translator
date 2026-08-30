@@ -1,7 +1,7 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
  * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * with continuous streaming, robust reconnect, and instant sentence emission.
+ * with transparent telemetry and error logging.
  */
 
 class GeminiTranscribeClient {
@@ -19,13 +19,38 @@ class GeminiTranscribeClient {
     this.onTranscriptChunk = config.onTranscriptChunk || null;
     this.onStatusChange = config.onStatusChange || null;
 
-    // Streaming state
+    // Telemetry state
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
     this.totalFramesSent = 0;
     this.totalWordsTranscribed = 0;
+    this.lastServerMessage = 'None yet';
+    this.lastCloseCode = null;
+    this.lastCloseReason = null;
     this.lastError = null;
+  }
+
+  getDebugInfo() {
+    let wsStateStr = 'CLOSED';
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.CONNECTING) wsStateStr = 'CONNECTING';
+      else if (this.ws.readyState === WebSocket.OPEN) wsStateStr = 'OPEN';
+      else if (this.ws.readyState === WebSocket.CLOSING) wsStateStr = 'CLOSING';
+      else if (this.ws.readyState === WebSocket.CLOSED) wsStateStr = 'CLOSED';
+    }
+
+    return {
+      wsState: wsStateStr,
+      model: this.model,
+      isSetupComplete: this.isSetupComplete,
+      totalFramesSent: this.totalFramesSent,
+      totalWordsTranscribed: this.totalWordsTranscribed,
+      lastServerMessage: this.lastServerMessage,
+      lastCloseCode: this.lastCloseCode,
+      lastCloseReason: this.lastCloseReason,
+      lastError: this.lastError
+    };
   }
 
   updateConfig(config = {}) {
@@ -94,24 +119,23 @@ class GeminiTranscribeClient {
       };
 
       this.ws.onclose = (event) => {
-        console.log(`[GeminiTranscribe] WebSocket closed (code: ${event.code}, reason: "${event.reason}")`);
+        this.lastCloseCode = event.code;
+        this.lastCloseReason = event.reason || '';
         this.isConnected = false;
         this.isConnecting = false;
         this.isSetupComplete = false;
 
-        if (event.reason) {
-          this.lastError = `Closed: ${event.reason} (code ${event.code})`;
-        } else if (event.code === 1006) {
-          this.lastError = 'Connection closed (code 1006). Reconnecting...';
-        }
+        let closeMsg = `WebSocket closed (code ${event.code}${event.reason ? ': ' + event.reason : ''})`;
+        console.log(`[GeminiTranscribe] ${closeMsg}`);
+        this.lastError = closeMsg;
 
         this.flush();
 
         if (this.autoReconnect) {
-          this._emitStatus('error', this.lastError || 'Reconnecting...');
+          this._emitStatus('error', closeMsg + ' - Reconnecting...');
           this.reconnectTimer = setTimeout(() => {
             this.connect();
-          }, 1200);
+          }, 1500);
         } else {
           this._emitStatus('disconnected', 'Live Transcribe disconnected.');
         }
@@ -141,6 +165,7 @@ class GeminiTranscribeClient {
 
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
+    this.lastServerMessage = `Setup sent (model: models/${cleanModel})`;
     console.log('[GeminiTranscribe] Setup handshake sent for models/' + cleanModel);
   }
 
@@ -190,14 +215,15 @@ class GeminiTranscribeClient {
       }
 
       if (!rawText) return;
+      this.lastServerMessage = rawText.length > 80 ? rawText.substring(0, 80) + '...' : rawText;
+
       const data = JSON.parse(rawText);
 
       if (data.setupComplete) {
-        console.log('[GeminiTranscribe] Server confirmed setupComplete!');
+        this.lastServerMessage = 'setupComplete received from Google!';
         this._emitStatus('connected', 'Live ASR Ready');
       }
 
-      // Check serverContent (Standard Live Multimodal API format)
       if (data.serverContent) {
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
@@ -205,6 +231,7 @@ class GeminiTranscribeClient {
             if (part.text) {
               this.currentUtterance += part.text;
               this.totalWordsTranscribed += part.text.split(/\s+/).filter(Boolean).length;
+              this.lastServerMessage = `Text: "${part.text.trim()}"`;
 
               // 1. Emit live transcription preview
               if (this.onTranscriptChunk) {

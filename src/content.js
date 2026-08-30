@@ -24,6 +24,7 @@
     framesSent: 0,
     cuesSaved: 0,
     lastTranscribed: '',
+    wsInfo: null,
     lastError: null,
     lastUpdated: Date.now()
   };
@@ -41,8 +42,11 @@
   };
 
   function publishDiagnostics(extra = {}) {
+    const wsInfo = transcribeClient ? transcribeClient.getDebugInfo() : null;
+
     Object.assign(diagnostics, extra, {
       videoId: currentVideoId,
+      wsInfo: wsInfo,
       cuesSaved: subtitleRenderer ? subtitleRenderer.getCues().length : 0,
       lastUpdated: Date.now()
     });
@@ -92,7 +96,7 @@
       fontColor: config.fontColor,
       backgroundColor: config.backgroundColor,
       bottomOffset: config.bottomOffset,
-      showDualSubtitles: false // Single transcription track
+      showDualSubtitles: false
     });
     subtitleRenderer.setEnabled(config.enabled);
 

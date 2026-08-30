@@ -77,9 +77,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (tabs && tabs[0] && tabs[0].url) {
         activeVideoId = StorageManager.extractVideoId(tabs[0].url);
         if (activeVideoId) {
-          const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
+          const cues = await storageManager.loadSubtitles(activeVideoId);
           if (cues && cues.length > 0) {
-            memoryDesc.textContent = `✨ ${cues.length} subtitle fragments remembered`;
+            memoryDesc.textContent = `✨ ${cues.length} transcription fragments remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
@@ -94,11 +94,17 @@ document.addEventListener('DOMContentLoaded', async () => {
               logText += `[Status] ${diag.status || 'Active'}\n`;
               logText += `[PCM Frames] ${diag.framesSent || 0} sent\n`;
               logText += `[Saved in Storage] ${cues.length} fragments\n`;
-              if (diag.lastTranscribed) {
-                logText += `[Transcribed] "${diag.lastTranscribed.substring(0, 35)}..."\n`;
+
+              if (diag.wsInfo) {
+                logText += `[WebSocket] ${diag.wsInfo.wsState} (Model: ${diag.wsInfo.model})\n`;
+                logText += `[Server Resp] ${diag.wsInfo.lastServerMessage}\n`;
+                if (diag.wsInfo.lastCloseCode) {
+                  logText += `[Last Close] Code: ${diag.wsInfo.lastCloseCode} (${diag.wsInfo.lastCloseReason || 'None'})\n`;
+                }
               }
-              if (diag.lastTranslated) {
-                logText += `[Translated] "${diag.lastTranslated.substring(0, 35)}..."\n`;
+
+              if (diag.lastTranscribed) {
+                logText += `[Transcribed] "${diag.lastTranscribed.substring(0, 45)}..."\n`;
               }
               if (diag.lastError) {
                 logText += `[⚠️ Error] ${diag.lastError}\n`;
