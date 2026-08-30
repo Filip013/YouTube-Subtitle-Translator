@@ -1,13 +1,12 @@
 /**
  * Popup Script for YouTube Subtitle Translator
- * Live Telemetry Monitor & Settings Controller
+ * Flash Live Translate Controller & Monitor
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
   const toggleEnabled = document.getElementById('toggle-enabled');
   const segmentBtns = document.querySelectorAll('.segment-btn');
   const genderBtns = document.querySelectorAll('.gender-btn');
-  const toggleDualSubtitles = document.getElementById('toggle-dual-subtitles');
   const apiKeyInput = document.getElementById('api-key-input');
   const btnSaveKey = document.getElementById('btn-save-key');
   const apiStatusBadge = document.getElementById('api-status-badge');
@@ -26,11 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    transcribeModel: 'gemini-3.5-transcribe-live',
-    translateModel: 'gemini-3.1-flash-lite',
+    liveModel: 'gemini-2.0-flash-exp',
     scriptType: 'latin',
     speakerGender: 'auto',
-    showDualSubtitles: false,
     sensitivity: 'medium'
   };
 
@@ -39,7 +36,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     toggleEnabled.checked = items.enabled;
     currentScriptType = items.scriptType || 'latin';
     currentSpeakerGender = items.speakerGender || 'auto';
-    toggleDualSubtitles.checked = Boolean(items.showDualSubtitles);
 
     // Script buttons
     segmentBtns.forEach(btn => {
@@ -77,9 +73,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (tabs && tabs[0] && tabs[0].url) {
         activeVideoId = StorageManager.extractVideoId(tabs[0].url);
         if (activeVideoId) {
-          const cues = await storageManager.loadSubtitles(activeVideoId);
+          const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
           if (cues && cues.length > 0) {
-            memoryDesc.textContent = `✨ ${cues.length} transcription fragments remembered`;
+            memoryDesc.textContent = `✨ ${cues.length} Serbian subtitles remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
@@ -91,27 +87,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             const diag = res.yt_live_diagnostics;
             if (diag) {
               let logText = `[Video ID] ${diag.videoId || activeVideoId}\n`;
+              logText += `[Mode] ${diag.mode || 'Flash Live Translate'}\n`;
               logText += `[Status] ${diag.status || 'Active'}\n`;
               logText += `[PCM Frames] ${diag.framesSent || 0} sent\n`;
-              logText += `[Saved in Storage] ${cues.length} fragments\n`;
+              logText += `[Saved in Storage] ${cues.length} subtitles\n`;
 
               if (diag.wsInfo) {
                 logText += `[WebSocket] ${diag.wsInfo.wsState} (Model: ${diag.wsInfo.model})\n`;
-                logText += `[Server Resp] ${diag.wsInfo.lastServerMessage}\n`;
+                logText += `[Server Message] ${diag.wsInfo.lastServerMessage}\n`;
                 if (diag.wsInfo.lastCloseCode) {
                   logText += `[Last Close] Code: ${diag.wsInfo.lastCloseCode} (${diag.wsInfo.lastCloseReason || 'None'})\n`;
                 }
               }
 
-              if (diag.lastTranscribed) {
-                logText += `[Transcribed] "${diag.lastTranscribed.substring(0, 45)}..."\n`;
+              if (diag.lastTranslated) {
+                logText += `[Serbian] "${diag.lastTranslated.substring(0, 45)}..."\n`;
               }
               if (diag.lastError) {
                 logText += `[⚠️ Error] ${diag.lastError}\n`;
               }
               liveDebugLog.textContent = logText;
             } else {
-              liveDebugLog.textContent = `[Video ID] ${activeVideoId}\nStored Fragments: ${cues.length}\nPlay the video to stream audio.`;
+              liveDebugLog.textContent = `[Video ID] ${activeVideoId}\nStored Subtitles: ${cues.length}\nPlay the video to stream audio.`;
             }
           });
           return;
@@ -149,11 +146,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Toggle enable/disable
   toggleEnabled.addEventListener('change', () => {
     chrome.storage.sync.set({ enabled: toggleEnabled.checked });
-  });
-
-  // Toggle Dual Subtitles
-  toggleDualSubtitles.addEventListener('change', () => {
-    chrome.storage.sync.set({ showDualSubtitles: toggleDualSubtitles.checked });
   });
 
   // Script selection

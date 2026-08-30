@@ -1,29 +1,58 @@
 /**
- * Gemini Live Client for YouTube Subtitle Translator
- * Connects to Google's Multimodal Live API over WebSockets (gemini-3.1-flash-live)
- * with instant fragment finalization and direct persistence.
+ * Gemini Live Client for YouTube Subtitle Translator (End-to-End Live Translation)
+ * Connects to Google's Multimodal Live API over WebSockets (gemini-2.0-flash-exp / gemini-3.1-flash-live)
+ * Streams 16kHz PCM audio and outputs real-time translated Serbian subtitles with zero REST API calls.
  */
 
 class GeminiLiveClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-3.1-flash-live';
+    this.model = config.model || 'gemini-2.0-flash-exp';
     this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
+    this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 
     this.ws = null;
     this.isConnected = false;
     this.isConnecting = false;
     this.isSetupComplete = false;
+    this.autoReconnect = true;
+    this.reconnectTimer = null;
 
     this.onSubtitleChunk = config.onSubtitleChunk || null;
     this.onStatusChange = config.onStatusChange || null;
 
-    // Streaming text state
+    // Streaming state
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
-    this.reconnectTimer = null;
-    this.reconnectAttempts = 0;
+    this.totalFramesSent = 0;
+    this.totalWordsTranslated = 0;
+    this.lastServerMessage = 'None yet';
+    this.lastCloseCode = null;
+    this.lastCloseReason = null;
+    this.lastError = null;
+  }
+
+  getDebugInfo() {
+    let wsStateStr = 'CLOSED';
+    if (this.ws) {
+      if (this.ws.readyState === WebSocket.CONNECTING) wsStateStr = 'CONNECTING';
+      else if (this.ws.readyState === WebSocket.OPEN) wsStateStr = 'OPEN';
+      else if (this.ws.readyState === WebSocket.CLOSING) wsStateStr = 'CLOSING';
+      else if (this.ws.readyState === WebSocket.CLOSED) wsStateStr = 'CLOSED';
+    }
+
+    return {
+      wsState: wsStateStr,
+      model: this.model,
+      isSetupComplete: this.isSetupComplete,
+      totalFramesSent: this.totalFramesSent,
+      totalWordsTranslated: this.totalWordsTranslated,
+      lastServerMessage: this.lastServerMessage,
+      lastCloseCode: this.lastCloseCode,
+      lastCloseReason: this.lastCloseReason,
+      lastError: this.lastError
+    };
   }
 
   updateConfig(config = {}) {
@@ -40,6 +69,10 @@ class GeminiLiveClient {
       this.scriptType = config.scriptType;
       needsReconnect = true;
     }
+    if (config.speakerGender !== undefined && config.speakerGender !== this.speakerGender) {
+      this.speakerGender = config.speakerGender;
+      needsReconnect = true;
+    }
 
     if (needsReconnect && this.isConnected) {
       this.reconnect();
@@ -51,7 +84,8 @@ class GeminiLiveClient {
    */
   connect() {
     if (!this.apiKey) {
-      this._emitStatus('error', 'API key is missing.');
+      this.lastError = 'API key is missing.';
+      this._emitStatus('error', this.lastError);
       return;
     }
 
@@ -59,10 +93,17 @@ class GeminiLiveClient {
       return;
     }
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     this.isConnecting = true;
     this.isSetupComplete = false;
-    this._emitStatus('connecting', 'Connecting to Gemini Live WebSocket...');
+    this.lastError = null;
+    this._emitStatus('connecting', 'Connecting to Flash Live WebSocket...');
 
+    const cleanModel = this.model.replace(/^models\//, '');
     const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.apiKey}`;
 
     try {
@@ -71,68 +112,91 @@ class GeminiLiveClient {
       this.ws.onopen = () => {
         this.isConnected = true;
         this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        this._sendSetupHandshake();
-        this._emitStatus('connected', 'Live WebSocket connected.');
-        console.log('[GeminiLive] Connected to Gemini Multimodal Live API:', this.model);
+        this.lastError = null;
+        this._sendSetupHandshake(cleanModel);
+        this._emitStatus('connected', `Live Translate (${cleanModel})`);
+        console.log('[GeminiLive] Connected to Gemini Multimodal Live API:', cleanModel);
       };
 
-      this.ws.onmessage = (event) => {
-        this._handleServerMessage(event);
+      this.ws.onmessage = async (event) => {
+        await this._handleServerMessage(event);
       };
 
       this.ws.onerror = (err) => {
-        console.error('[GeminiLive] WebSocket error:', err);
-        this._emitStatus('error', 'Live WebSocket error.');
+        this.lastError = 'Live WebSocket connection error.';
+        console.warn('[GeminiLive] WebSocket error:', err);
+        this._emitStatus('error', this.lastError);
       };
 
       this.ws.onclose = (event) => {
-        console.log('[GeminiLive] WebSocket closed:', event.code, event.reason);
+        this.lastCloseCode = event.code;
+        this.lastCloseReason = event.reason || '';
         this.isConnected = false;
         this.isConnecting = false;
         this.isSetupComplete = false;
-        this._emitStatus('disconnected', 'Live WebSocket disconnected.');
+
+        let closeMsg = `WebSocket closed (code ${event.code}${event.reason ? ': ' + event.reason : ''})`;
+        console.log(`[GeminiLive] ${closeMsg}`);
+        this.lastError = closeMsg;
+
+        this.flush();
+
+        if (this.autoReconnect) {
+          this._emitStatus('error', closeMsg + ' - Reconnecting...');
+          this.reconnectTimer = setTimeout(() => {
+            this.connect();
+          }, 1500);
+        } else {
+          this._emitStatus('disconnected', 'Live Translate disconnected.');
+        }
       };
     } catch (err) {
+      this.lastError = `Connection failed: ${err.message}`;
       console.error('[GeminiLive] Failed to create WebSocket:', err);
       this.isConnecting = false;
-      this._emitStatus('error', err.message);
+      this._emitStatus('error', this.lastError);
+      if (this.autoReconnect) {
+        this.reconnectTimer = setTimeout(() => this.connect(), 2000);
+      }
     }
   }
 
-  /**
-   * Sends the initial BidiGenerateContentSetup configuration handshake
-   */
-  _sendSetupHandshake() {
+  _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const scriptDesc = this.scriptType === 'cyrillic'
-      ? 'Target script: Serbian Cyrillic (Srpska Ćirilica - азбука: а, б, в, г, д, ђ, е, ж, з, и, ј, к, л, љ, м, н, њ, о, п, р, с, т, ћ, у, ф, х, ц, ч, џ, ш).'
-      : 'Target script: Serbian Latin (Srpska Latinica - abeceda: a, b, c, č, ć, d, dž, đ, e, f, g, h, i, j, k, l, lj, m, n, nj, o, p, r, s, š, t, u, v, z, ž).';
+    const scriptInstruction = this.scriptType === 'cyrillic'
+      ? 'Target script: Serbian Cyrillic (Srpska Ćirilica: а, б, в, г, д, ђ, е, ж, з, и, ј, к, л, љ, м, н, њ, о, п, р, с, т, ћ, у, ф, х, ц, ч, џ, ш).'
+      : 'Target script: Serbian Latin (Srpska Latinica: a, b, c, č, ć, d, dž, đ, e, f, g, h, i, j, k, l, lj, m, n, nj, o, p, r, s, š, t, u, v, z, ž).';
 
-    const systemPrompt = `You are an expert real-time speech-to-subtitle translator.
-You will hear live spoken audio from a video. Translate everything spoken directly into natural Serbian.
-${scriptDesc}
+    let genderInstruction = '';
+    if (this.speakerGender === 'female') {
+      genderInstruction = 'The speaker is FEMALE. Use feminine past tense verb forms and adjectives (e.g. bila sam, rekla sam, videla sam, srećna).';
+    } else if (this.speakerGender === 'male') {
+      genderInstruction = 'The speaker is MALE. Use masculine past tense verb forms and adjectives (e.g. bio sam, rekao sam, video sam, srećan).';
+    } else {
+      genderInstruction = 'Default to standard natural Serbian phrasing with appropriate context agreement.';
+    }
 
-CRITICAL RULES:
-1. Pay close attention to speaker vocal pitch, gender, tone, and emotion to choose the correct Serbian past tense and adjective gender forms (e.g. bio sam vs bila sam, rekao sam vs rekla sam, srećan vs srećna).
-2. Output ONLY the translated Serbian subtitle text.
-3. DO NOT output conversational replies, conversational filler, greetings, timestamps, or quotes.
-4. Output text continuously in concise 1-2 line subtitle sentences as speech progresses.
-5. If there is only background music, ambient noise, laughter, or silence, DO NOT output anything.`;
+    const systemPrompt = `You are a live real-time speech-to-subtitles translator.
+Listen to the incoming English audio stream and translate spoken sentences directly and accurately into natural Serbian subtitles.
+${scriptInstruction}
+${genderInstruction}
+Strict Rules:
+1. Output ONLY the translated Serbian subtitle text in real-time.
+2. DO NOT output conversational filler, assistant replies, notes, metadata, or timestamps.
+3. Keep the translation concise, natural, and synchronized with video subtitles.
+4. If there is only background music or unintelligible noise, do not output anything.`;
 
     const setupPayload = {
       setup: {
-        model: `models/${this.model}`,
+        model: `models/${cleanModel}`,
         generationConfig: {
           responseModalities: ['TEXT'],
-          temperature: 0.2
+          temperature: 0.1
         },
         systemInstruction: {
           parts: [
-            {
-              text: systemPrompt
-            }
+            { text: systemPrompt }
           ]
         }
       }
@@ -140,14 +204,10 @@ CRITICAL RULES:
 
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
-    console.log('[GeminiLive] Setup handshake sent successfully.');
+    this.lastServerMessage = `Setup sent (model: models/${cleanModel})`;
+    console.log('[GeminiLive] Setup handshake sent for models/' + cleanModel);
   }
 
-  /**
-   * Streams a raw 16kHz 16-bit PCM audio frame to the Live API
-   * @param {string} base64PCM - Base64 encoded 16-bit little-endian PCM
-   * @param {number} videoTimeSec - Current video playback time
-   */
   sendAudioFrame(base64PCM, videoTimeSec) {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSetupComplete) {
       if (!this.isConnecting && !this.isConnected) {
@@ -158,6 +218,7 @@ CRITICAL RULES:
 
     const currentMs = Math.round(videoTimeSec * 1000);
     this.lastAudioVideoTimeMs = currentMs;
+    this.totalFramesSent++;
 
     if (this.turnStartVideoTimeMs === 0) {
       this.turnStartVideoTimeMs = Math.max(0, currentMs - 200);
@@ -181,12 +242,26 @@ CRITICAL RULES:
     }
   }
 
-  /**
-   * Handles incoming WebSocket messages from the Gemini Live Server
-   */
-  _handleServerMessage(event) {
+  async _handleServerMessage(event) {
     try {
-      const data = JSON.parse(event.data);
+      let rawText = '';
+      if (typeof event.data === 'string') {
+        rawText = event.data;
+      } else if (event.data instanceof Blob) {
+        rawText = await event.data.text();
+      } else if (event.data instanceof ArrayBuffer) {
+        rawText = new TextDecoder().decode(event.data);
+      }
+
+      if (!rawText) return;
+      this.lastServerMessage = rawText.length > 80 ? rawText.substring(0, 80) + '...' : rawText;
+
+      const data = JSON.parse(rawText);
+
+      if (data.setupComplete) {
+        this.lastServerMessage = 'setupComplete received from Google!';
+        this._emitStatus('connected', 'Live Translate Ready');
+      }
 
       if (data.serverContent) {
         const modelTurn = data.serverContent.modelTurn;
@@ -194,8 +269,10 @@ CRITICAL RULES:
           for (const part of modelTurn.parts) {
             if (part.text) {
               this.currentUtterance += part.text;
-              
-              // 1. Emit live preview immediately
+              this.totalWordsTranslated += part.text.split(/\s+/).filter(Boolean).length;
+              this.lastServerMessage = `Live: "${this.currentUtterance.trim()}"`;
+
+              // 1. Emit live streaming Serbian translation preview
               if (this.onSubtitleChunk) {
                 this.onSubtitleChunk({
                   text: this.currentUtterance.trim(),
@@ -205,14 +282,13 @@ CRITICAL RULES:
                 });
               }
 
-              // 2. Finalize fragment if clause ends, punctuation appears, or duration reaches threshold
+              // 2. Finalize when sentence ends or threshold reached
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
-              const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
-              const isTimeThreshold = durationMs >= 3000 && trimmed.length >= 10;
-              const isLengthThreshold = trimmed.length >= 50;
+              const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 5;
+              const isTimeThreshold = durationMs >= 2400 && trimmed.length >= 8;
 
-              if (hasPunctuation || isTimeThreshold || isLengthThreshold) {
+              if (hasPunctuation || isTimeThreshold) {
                 this._finalizeCurrentUtterance();
               }
             }
@@ -232,9 +308,6 @@ CRITICAL RULES:
     }
   }
 
-  /**
-   * Finalizes the current utterance into a permanent subtitle fragment
-   */
   _finalizeCurrentUtterance() {
     const finalText = this.currentUtterance.trim();
     if (finalText && finalText !== '[EMPTY]') {
@@ -273,6 +346,7 @@ CRITICAL RULES:
   }
 
   disconnect() {
+    this.autoReconnect = false;
     this.flush();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
