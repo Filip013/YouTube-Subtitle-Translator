@@ -1,14 +1,14 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator (End-to-End Live Translation)
  * Connects to Google's Multimodal Live API over WebSockets (gemini-3.5-live-translate-preview)
- * with official translationConfig (targetLanguageCode: 'sr-Latn' / 'sr-Cyrl').
+ * Uses systemInstruction to translate live English speech directly into Serbian subtitles.
  */
 
 class GeminiLiveClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
     this.model = config.model || 'gemini-3.5-live-translate-preview';
-    this.scriptType = config.scriptType || 'latin'; // 'latin' (sr-Latn) or 'cyrillic' (sr-Cyrl)
+    this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
     this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 
     this.ws = null;
@@ -164,8 +164,28 @@ class GeminiLiveClient {
   _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    // Use BCP-47 language tag for Serbian: sr-Latn (Latin) or sr-Cyrl (Cyrillic)
-    const targetLangCode = this.scriptType === 'cyrillic' ? 'sr-Cyrl' : 'sr-Latn';
+    const scriptInstruction = this.scriptType === 'cyrillic'
+      ? 'Translate into Serbian Cyrillic (Srpska Ćirilica: а, б, в, г, д, ђ, е, ж, з, и, ј, к, л, љ, м, н, њ, о, п, р, с, т, ћ, у, ф, х, ц, ч, џ, ш).'
+      : 'Translate into Serbian Latin (Srpska Latinica: a, b, c, č, ć, d, dž, đ, e, f, g, h, i, j, k, l, lj, m, n, nj, o, p, r, s, š, t, u, v, z, ž).';
+
+    let genderInstruction = '';
+    if (this.speakerGender === 'female') {
+      genderInstruction = 'The speaker is FEMALE. Use feminine past tense verb forms and adjectives (e.g. bila sam, rekla sam, videla sam, srećna).';
+    } else if (this.speakerGender === 'male') {
+      genderInstruction = 'The speaker is MALE. Use masculine past tense verb forms and adjectives (e.g. bio sam, rekao sam, video sam, srećan).';
+    } else {
+      genderInstruction = 'Default to standard natural Serbian phrasing with appropriate context agreement.';
+    }
+
+    const systemPrompt = `You are an expert real-time English-to-Serbian subtitle translator.
+Listen to the incoming English audio stream and translate spoken content directly and accurately into natural Serbian subtitles in real time.
+${scriptInstruction}
+${genderInstruction}
+Strict Rules:
+1. Output ONLY the translated Serbian subtitle text in real time.
+2. DO NOT output conversational filler, assistant replies, English transcripts, notes, or timestamps.
+3. Keep the translation natural, concise, and synchronized with video subtitles.
+4. If there is only background music or silence, output nothing.`;
 
     const setupPayload = {
       setup: {
@@ -173,17 +193,18 @@ class GeminiLiveClient {
         generationConfig: {
           responseModalities: ['TEXT']
         },
-        translationConfig: {
-          targetLanguageCode: targetLangCode,
-          echoTargetLanguage: false
+        systemInstruction: {
+          parts: [
+            { text: systemPrompt }
+          ]
         }
       }
     };
 
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
-    this.lastServerMessage = `Setup sent (model: models/${cleanModel}, target: ${targetLangCode})`;
-    console.log('[GeminiLive] Setup handshake sent with translationConfig for ' + targetLangCode);
+    this.lastServerMessage = `Setup sent (model: models/${cleanModel})`;
+    console.log('[GeminiLive] Setup handshake sent with systemInstruction for ' + cleanModel);
   }
 
   sendAudioFrame(base64PCM, videoTimeSec) {
@@ -259,7 +280,7 @@ class GeminiLiveClient {
           }
         }
 
-        // 2. Handle finalized translation from translationConfig pipeline
+        // 2. Handle finalized input translation
         if (data.serverContent.inputTranscription) {
           const finalText = data.serverContent.inputTranscription.text;
           if (finalText && finalText.trim()) {
