@@ -102,10 +102,8 @@
 
         const currentTimeMs = Math.round(pcmFrame.videoTimeSec * 1000);
 
-        // Check if this time range was ALREADY subtitled and saved in memory:
+        // Check if this time range is ALREADY subtitled and saved in memory:
         if (subtitleRenderer && subtitleRenderer.hasCueAtTime(currentTimeMs)) {
-          // If we are passing through an already subtitled segment, flush any pending live buffer
-          geminiLiveClient.flush();
           // Skip sending audio to avoid duplicate API calls & re-translation
           return;
         }
@@ -163,6 +161,7 @@
         if (storageManager) {
           storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
             if (subtitleRenderer) subtitleRenderer.clear();
+            if (geminiLiveClient) geminiLiveClient.resetStream();
             sendResponse({ success: true });
           });
           return true;
@@ -194,14 +193,14 @@
   /**
    * Handles streaming subtitle chunks received from Gemini Live API
    */
-  function handleLiveSubtitleChunk(subtitleData) {
+  async function handleLiveSubtitleChunk(subtitleData) {
     if (!config.enabled || !currentVideoId) return;
 
     if (!subtitleData.isFinal) {
-      // Live streaming real-time preview on screen
+      // Live preview on screen
       subtitleRenderer.setLiveCue(subtitleData.text, subtitleData.startMs, subtitleData.endMs);
     } else {
-      // Finalized sentence cue: commit and save
+      // Finalized sentence cue: commit and save immediately
       const cue = {
         text: subtitleData.text,
         startMs: subtitleData.startMs,
@@ -212,25 +211,17 @@
 
       if (storageManager) {
         const title = getVideoTitle();
-        storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
-        console.log(`[GeminiSubtitles] Persisted fragment [${cue.startMs}ms - ${cue.endMs}ms]: ${cue.text}`);
+        await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+        console.log(`[GeminiSubtitles] Successfully persisted fragment [${cue.startMs}ms - ${cue.endMs}ms]: ${cue.text}`);
       }
     }
-  }
-
-  /**
-   * Extract Video ID from URL
-   */
-  function getVideoId() {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get('v');
   }
 
   /**
    * Check for YouTube player element and attach capture
    */
   async function checkAndAttachPlayer() {
-    const videoId = getVideoId();
+    const videoId = StorageManager.extractVideoId(window.location.href);
     if (!videoId) {
       if (audioCapture) audioCapture.detach();
       if (geminiLiveClient) geminiLiveClient.disconnect();

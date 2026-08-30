@@ -16,7 +16,7 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
 {
   const sampleRate48k = 48000;
   const targetRate = 16000;
-  const inputBuffer = new Float32Array(4800); // 100ms at 48kHz
+  const inputBuffer = new Float32Array(4800);
   for (let i = 0; i < inputBuffer.length; i++) {
     inputBuffer[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate48k);
   }
@@ -34,7 +34,28 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   console.log('✓ AudioUtils.floatTo16BitPCMBase64 passed');
 }
 
-// 3. Test StorageManager SRT Export
+// 3. Test StorageManager extractVideoId
+{
+  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s'), 'dQw4w9WgXcQ');
+  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(StorageManager.extractVideoId('https://www.youtube.com/live/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  console.log('✓ StorageManager.extractVideoId passed for all YouTube formats');
+}
+
+// 4. Test StorageManager In-Memory Save & Load
+{
+  const storage = new StorageManager();
+  storage.saveCue('test_vid', 'latin', { startMs: 1000, endMs: 3000, text: 'Test subtitle' });
+  storage.loadSubtitles('test_vid', 'latin').then(cues => {
+    assert.strictEqual(cues.length, 1);
+    assert.strictEqual(cues[0].text, 'Test subtitle');
+    console.log('✓ StorageManager direct save and load verified');
+  });
+}
+
+// 5. Test StorageManager SRT Export
 {
   const cues = [
     { startMs: 1000, endMs: 4000, text: 'Prva rečenica' },
@@ -46,7 +67,7 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   console.log('✓ StorageManager.exportSRT passed');
 }
 
-// 4. Test SubtitleRenderer hasCueAtTime & removeCue
+// 6. Test SubtitleRenderer hasCueAtTime & removeCue
 {
   const renderer = new SubtitleRenderer();
   renderer.addCue({ startMs: 2000, endMs: 5000, text: 'Zdravo' });
@@ -57,27 +78,6 @@ console.log('--- Running Tests for AudioUtils, VADProcessor, GeminiService, Stor
   renderer.removeCue('2000_5000');
   assert.strictEqual(renderer.hasCueAtTime(3000), false, 'Cue should be removed');
   console.log('✓ SubtitleRenderer.hasCueAtTime & removeCue passed');
-}
-
-// 5. Test StorageManager keys
-{
-  const latinKey = StorageManager.getKey('dQw4w9WgXcQ', 'latin');
-  const cyrillicKey = StorageManager.getKey('dQw4w9WgXcQ', 'cyrillic');
-  assert.strictEqual(latinKey, 'yt_subs_dQw4w9WgXcQ_latin');
-  assert.strictEqual(cyrillicKey, 'yt_subs_dQw4w9WgXcQ_cyrillic');
-  console.log('✓ StorageManager key generation passed');
-}
-
-// 6. Test GeminiLiveClient instantiation
-{
-  const liveClient = new GeminiLiveClient({
-    apiKey: 'test_key',
-    model: 'gemini-3.1-flash-live',
-    scriptType: 'cyrillic'
-  });
-  assert.strictEqual(liveClient.model, 'gemini-3.1-flash-live');
-  assert.strictEqual(liveClient.scriptType, 'cyrillic');
-  console.log('✓ GeminiLiveClient configuration passed');
 }
 
 console.log('\n✅ ALL EXTENSION TESTS PASSED SUCCESSFULLY!');

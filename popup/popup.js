@@ -60,9 +60,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs && tabs[0] && tabs[0].url && tabs[0].url.includes('youtube.com/watch')) {
-        const url = new URL(tabs[0].url);
-        activeVideoId = url.searchParams.get('v');
+      if (tabs && tabs[0] && tabs[0].url) {
+        activeVideoId = StorageManager.extractVideoId(tabs[0].url);
         if (activeVideoId) {
           const cues = await storageManager.loadSubtitles(activeVideoId, currentScriptType);
           if (cues && cues.length > 0) {

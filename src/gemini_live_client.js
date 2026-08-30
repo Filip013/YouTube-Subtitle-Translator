@@ -1,7 +1,7 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator
  * Connects to Google's Multimodal Live API over WebSockets (gemini-3.1-flash-live)
- * with robust auto-commit of subtitle fragments and sequential timestamp tracking.
+ * with instant fragment finalization and direct persistence.
  */
 
 class GeminiLiveClient {
@@ -22,7 +22,6 @@ class GeminiLiveClient {
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
-    this.lastCommitTimeMs = 0;
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
   }
@@ -119,7 +118,7 @@ CRITICAL RULES:
 1. Pay close attention to speaker vocal pitch, gender, tone, and emotion to choose the correct Serbian past tense and adjective gender forms (e.g. bio sam vs bila sam, rekao sam vs rekla sam, srećan vs srećna).
 2. Output ONLY the translated Serbian subtitle text.
 3. DO NOT output conversational replies, conversational filler, greetings, timestamps, or quotes.
-4. Output text continuously in short, concise subtitle lines (1-2 lines per sentence) as speech progresses.
+4. Output text continuously in concise 1-2 line subtitle sentences as speech progresses.
 5. If there is only background music, ambient noise, laughter, or silence, DO NOT output anything.`;
 
     const setupPayload = {
@@ -162,7 +161,6 @@ CRITICAL RULES:
 
     if (this.turnStartVideoTimeMs === 0) {
       this.turnStartVideoTimeMs = Math.max(0, currentMs - 200);
-      this.lastCommitTimeMs = this.turnStartVideoTimeMs;
     }
 
     const audioPayload = {
@@ -197,7 +195,7 @@ CRITICAL RULES:
             if (part.text) {
               this.currentUtterance += part.text;
               
-              // 1. Emit live streaming preview
+              // 1. Emit live preview immediately
               if (this.onSubtitleChunk) {
                 this.onSubtitleChunk({
                   text: this.currentUtterance.trim(),
@@ -207,15 +205,12 @@ CRITICAL RULES:
                 });
               }
 
-              // 2. Auto-commit conditions:
-              // - Punctuation ending (. ! ? \n)
-              // - OR duration >= 3.5 seconds of audio elapsed
-              // - OR utterance length >= 50 characters
+              // 2. Finalize fragment if clause ends, punctuation appears, or duration reaches threshold
               const trimmed = this.currentUtterance.trim();
-              const elapsedMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
-              const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 8;
-              const isTimeThreshold = elapsedMs >= 3500 && trimmed.length >= 15;
-              const isLengthThreshold = trimmed.length >= 60;
+              const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
+              const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
+              const isTimeThreshold = durationMs >= 3000 && trimmed.length >= 10;
+              const isLengthThreshold = trimmed.length >= 50;
 
               if (hasPunctuation || isTimeThreshold || isLengthThreshold) {
                 this._finalizeCurrentUtterance();
@@ -224,7 +219,6 @@ CRITICAL RULES:
           }
         }
 
-        // Turn complete from server
         if (data.serverContent.turnComplete) {
           this._finalizeCurrentUtterance();
         }
@@ -239,7 +233,7 @@ CRITICAL RULES:
   }
 
   /**
-   * Commits the current utterance into a permanent, timestamped subtitle fragment
+   * Finalizes the current utterance into a permanent subtitle fragment
    */
   _finalizeCurrentUtterance() {
     const finalText = this.currentUtterance.trim();
@@ -258,40 +252,26 @@ CRITICAL RULES:
     }
 
     this.currentUtterance = '';
-    // Roll start time forward to current audio position
     this.turnStartVideoTimeMs = this.lastAudioVideoTimeMs;
-    this.lastCommitTimeMs = this.lastAudioVideoTimeMs;
   }
 
-  /**
-   * Flush any pending subtitle on pause or seek
-   */
   flush() {
     if (this.currentUtterance.trim()) {
       this._finalizeCurrentUtterance();
     }
   }
 
-  /**
-   * Reset turn state and video time on seek
-   */
   resetStream() {
     this.flush();
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
   }
 
-  /**
-   * Reconnects the WebSocket stream
-   */
   reconnect() {
     this.disconnect();
     setTimeout(() => this.connect(), 200);
   }
 
-  /**
-   * Disconnects WebSocket
-   */
   disconnect() {
     this.flush();
     if (this.reconnectTimer) {
