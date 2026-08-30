@@ -20,6 +20,7 @@
   const diagnostics = {
     videoId: null,
     status: 'Initializing...',
+    audioLevel: 0,
     framesSent: 0,
     cuesSaved: 0,
     lastTranscribed: '',
@@ -147,8 +148,10 @@
 
         transcribeClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
         diagnostics.framesSent++;
-        if (diagnostics.framesSent % 25 === 0) {
-          publishDiagnostics({ status: 'Streaming audio to Live ASR...' });
+        diagnostics.audioLevel = Math.round((pcmFrame.rms || 0) * 100);
+
+        if (diagnostics.framesSent % 20 === 0) {
+          publishDiagnostics({ status: `Streaming audio (Level: ${diagnostics.audioLevel}%)` });
         }
       }
     });
