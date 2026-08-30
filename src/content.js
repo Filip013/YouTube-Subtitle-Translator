@@ -1,6 +1,6 @@
 /**
  * Content Script Orchestrator for YouTube Subtitle Translator (Two-Stage Pipeline)
- * Stage 1: gemini-3.5-transcribe-live (Live ASR over WebSockets)
+ * Stage 1: gemini-2.0-flash-exp (Live ASR over WebSockets)
  * Stage 2: gemini-3.1-flash-lite (Fast Text-to-Text Serbian Translation)
  */
 
@@ -16,11 +16,23 @@
   let subtitleRenderer = null;
   let isInitialized = false;
 
+  // Real-time telemetry state
+  const diagnostics = {
+    videoId: null,
+    status: 'Initializing...',
+    framesSent: 0,
+    cuesSaved: 0,
+    lastTranscribed: '',
+    lastTranslated: '',
+    lastError: null,
+    lastUpdated: Date.now()
+  };
+
   // Default configuration
   const config = {
     enabled: true,
     apiKey: '',
-    transcribeModel: 'gemini-3.5-transcribe-live',
+    transcribeModel: 'gemini-2.0-flash-exp',
     translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin', // 'latin' or 'cyrillic'
     speakerGender: 'auto', // 'auto', 'male', 'female'
@@ -31,6 +43,18 @@
     backgroundColor: 'rgba(0, 0, 0, 0.78)',
     bottomOffset: 12
   };
+
+  function publishDiagnostics(extra = {}) {
+    Object.assign(diagnostics, extra, {
+      videoId: currentVideoId,
+      cuesSaved: subtitleRenderer ? subtitleRenderer.getCues().length : 0,
+      lastUpdated: Date.now()
+    });
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ yt_live_diagnostics: diagnostics });
+    }
+  }
 
   /**
    * Initialize settings from storage
@@ -90,6 +114,7 @@
       model: config.transcribeModel,
       onTranscriptChunk: handleTranscriptChunk,
       onStatusChange: (status, msg) => {
+        publishDiagnostics({ status: msg, lastError: status === 'error' ? msg : null });
         if (status === 'connecting') {
           subtitleRenderer.setStatus('translating');
         } else if (status === 'error') {
@@ -121,11 +146,15 @@
         }
 
         transcribeClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
+        diagnostics.framesSent++;
+        if (diagnostics.framesSent % 25 === 0) {
+          publishDiagnostics({ status: 'Streaming audio to Live ASR...' });
+        }
       }
     });
 
     isInitialized = true;
-    console.log('[GeminiSubtitles] Two-Stage Pipeline Initialized: Transcribe (' + config.transcribeModel + ') + Translate (' + config.translateModel + ')');
+    console.log('[GeminiSubtitles] Extension initialized.');
 
     // Listen for storage updates
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -182,6 +211,7 @@
           storageManager.deleteVideoSubtitles(currentVideoId).then(() => {
             if (subtitleRenderer) subtitleRenderer.clear();
             if (transcribeClient) transcribeClient.resetStream();
+            publishDiagnostics({ cuesSaved: 0, lastTranscribed: '', lastTranslated: '' });
             sendResponse({ success: true });
           });
           return true;
@@ -204,8 +234,16 @@
       if (storedCues && storedCues.length > 0) {
         console.log(`[GeminiSubtitles] Loaded ${storedCues.length} remembered subtitles for video: ${videoId}`);
         storedCues.forEach(cue => subtitleRenderer.addCue(cue));
+        publishDiagnostics({
+          status: `Loaded ${storedCues.length} fragments from memory`,
+          cuesSaved: storedCues.length
+        });
       } else {
         console.log(`[GeminiSubtitles] No existing saved subtitles for video: ${videoId}`);
+        publishDiagnostics({
+          status: 'Ready. No saved fragments yet.',
+          cuesSaved: 0
+        });
       }
     } catch (err) {
       console.warn('[GeminiSubtitles] Failed to load stored subtitles:', err);
@@ -221,9 +259,15 @@
     if (!chunkData.isFinal) {
       // Live transcription preview on screen
       subtitleRenderer.setLiveCue(chunkData.text, chunkData.startMs, chunkData.endMs);
+      publishDiagnostics({ lastTranscribed: chunkData.text });
     } else {
       // Stage 2: Translate clean English sentence to Serbian via Flash Lite
       const englishText = chunkData.text;
+      publishDiagnostics({
+        status: `Translating: "${englishText.substring(0, 30)}..."`,
+        lastTranscribed: englishText
+      });
+
       const serbianText = await textTranslator.translateText(englishText);
 
       if (serbianText) {
@@ -239,6 +283,11 @@
         if (storageManager) {
           const title = getVideoTitle();
           await storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+          publishDiagnostics({
+            status: 'Fragment translated & saved!',
+            lastTranslated: serbianText,
+            cuesSaved: subtitleRenderer.getCues().length
+          });
           console.log(`[GeminiSubtitles] Saved fragment: "${englishText}" -> "${serbianText}" [${cue.startMs}ms - ${cue.endMs}ms]`);
         }
       }
@@ -255,6 +304,7 @@
       if (transcribeClient) transcribeClient.disconnect();
       if (subtitleRenderer) subtitleRenderer.clear();
       currentVideoId = null;
+      publishDiagnostics({ status: 'Not on a YouTube video page' });
       return;
     }
 
@@ -266,6 +316,7 @@
 
       if (isNewVideo) {
         currentVideoId = videoId;
+        diagnostics.framesSent = 0;
         if (subtitleRenderer) subtitleRenderer.clear();
         if (vadProcessor) vadProcessor.reset();
         if (transcribeClient) {
@@ -274,12 +325,10 @@
         }
       }
 
-      // Initialize subtitle renderer and audio capture
       subtitleRenderer.init(playerContainer, videoElement);
       audioCapture.attach(videoElement);
 
       if (isNewVideo) {
-        // Load stored subtitles after renderer DOM is initialized
         await loadStoredSubtitles(videoId);
       }
     } else {

@@ -1,13 +1,13 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
- * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * with binary/Blob support, automatic reconnection, and zero-loss sentence finalization.
+ * Connects to Google's Multimodal Live API over WebSockets (gemini-2.0-flash-exp / gemini-3.1-flash-live)
+ * with robust auto-reconnection, Blob decoding, and live diagnostics reporting.
  */
 
 class GeminiTranscribeClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-3.5-transcribe-live';
+    this.model = config.model || 'gemini-2.0-flash-exp';
 
     this.ws = null;
     this.isConnected = false;
@@ -19,11 +19,13 @@ class GeminiTranscribeClient {
     this.onTranscriptChunk = config.onTranscriptChunk || null;
     this.onStatusChange = config.onStatusChange || null;
 
-    // Streaming transcription state
+    // Streaming state & diagnostics
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
+    this.totalFramesSent = 0;
     this.totalWordsTranscribed = 0;
+    this.lastError = null;
   }
 
   updateConfig(config = {}) {
@@ -43,11 +45,12 @@ class GeminiTranscribeClient {
   }
 
   /**
-   * Establishes the WebSocket connection with Gemini Live Transcribe
+   * Establishes the WebSocket connection with Gemini Live API
    */
   connect() {
     if (!this.apiKey) {
-      this._emitStatus('error', 'API key is missing.');
+      this.lastError = 'API key is missing.';
+      this._emitStatus('error', this.lastError);
       return;
     }
 
@@ -62,8 +65,11 @@ class GeminiTranscribeClient {
 
     this.isConnecting = true;
     this.isSetupComplete = false;
-    this._emitStatus('connecting', 'Connecting to Live Transcribe WebSocket...');
+    this.lastError = null;
+    this._emitStatus('connecting', 'Connecting to Gemini Live WebSocket...');
 
+    // Clean model name (ensure models/ prefix is handled properly in setup)
+    const cleanModel = this.model.replace(/^models\//, '');
     const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.apiKey}`;
 
     try {
@@ -72,9 +78,10 @@ class GeminiTranscribeClient {
       this.ws.onopen = () => {
         this.isConnected = true;
         this.isConnecting = false;
-        this._sendSetupHandshake();
-        this._emitStatus('connected', 'Live Transcribe connected.');
-        console.log('[GeminiTranscribe] Connected to Live Transcribe:', this.model);
+        this.lastError = null;
+        this._sendSetupHandshake(cleanModel);
+        this._emitStatus('connected', `Connected to Gemini Live (${cleanModel})`);
+        console.log('[GeminiTranscribe] WebSocket connected with model:', cleanModel);
       };
 
       this.ws.onmessage = async (event) => {
@@ -82,30 +89,39 @@ class GeminiTranscribeClient {
       };
 
       this.ws.onerror = (err) => {
-        console.warn('[GeminiTranscribe] WebSocket error, will reconnect:', err);
-        this._emitStatus('error', 'Reconnecting...');
+        this.lastError = 'WebSocket connection error.';
+        console.warn('[GeminiTranscribe] WebSocket error:', err);
+        this._emitStatus('error', this.lastError);
       };
 
       this.ws.onclose = (event) => {
-        console.log('[GeminiTranscribe] WebSocket closed (code: ' + event.code + '). Handling reconnect...');
+        console.log(`[GeminiTranscribe] WebSocket closed (code: ${event.code}, reason: "${event.reason}")`);
         this.isConnected = false;
         this.isConnecting = false;
         this.isSetupComplete = false;
+
+        if (event.reason) {
+          this.lastError = `Closed: ${event.reason} (code ${event.code})`;
+        } else if (event.code === 1006) {
+          this.lastError = 'Connection closed abruptly (code 1006). Reconnecting...';
+        }
+
         this.flush();
 
         if (this.autoReconnect) {
-          this._emitStatus('error', 'Reconnecting...');
+          this._emitStatus('error', this.lastError || 'Reconnecting...');
           this.reconnectTimer = setTimeout(() => {
             this.connect();
-          }, 1000);
+          }, 1200);
         } else {
           this._emitStatus('disconnected', 'Live Transcribe disconnected.');
         }
       };
     } catch (err) {
+      this.lastError = `Connection failed: ${err.message}`;
       console.error('[GeminiTranscribe] Failed to create WebSocket:', err);
       this.isConnecting = false;
-      this._emitStatus('error', err.message);
+      this._emitStatus('error', this.lastError);
       if (this.autoReconnect) {
         this.reconnectTimer = setTimeout(() => this.connect(), 2000);
       }
@@ -115,21 +131,31 @@ class GeminiTranscribeClient {
   /**
    * Sends the initial BidiGenerateContentSetup for transcription
    */
-  _sendSetupHandshake() {
+  _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const systemPrompt = `You are a real-time speech-to-text transcriber.
+Listen to the live audio stream and transcribe spoken words into clean, punctuated English.
+Output ONLY the transcribed English text. Do not output filler, conversational replies, or timestamps.`;
 
     const setupPayload = {
       setup: {
-        model: `models/${this.model}`,
+        model: `models/${cleanModel}`,
         generationConfig: {
-          responseModalities: ['TEXT']
+          responseModalities: ['TEXT'],
+          temperature: 0.1
+        },
+        systemInstruction: {
+          parts: [
+            { text: systemPrompt }
+          ]
         }
       }
     };
 
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
-    console.log('[GeminiTranscribe] Transcribe setup sent successfully.');
+    console.log('[GeminiTranscribe] Setup handshake sent for models/' + cleanModel);
   }
 
   /**
@@ -145,6 +171,7 @@ class GeminiTranscribeClient {
 
     const currentMs = Math.round(videoTimeSec * 1000);
     this.lastAudioVideoTimeMs = currentMs;
+    this.totalFramesSent++;
 
     if (this.turnStartVideoTimeMs === 0) {
       this.turnStartVideoTimeMs = Math.max(0, currentMs - 200);
@@ -185,13 +212,19 @@ class GeminiTranscribeClient {
       if (!rawText) return;
       const data = JSON.parse(rawText);
 
+      // Check for setup completion
+      if (data.setupComplete) {
+        console.log('[GeminiTranscribe] Server confirmed setupComplete!');
+        this._emitStatus('connected', 'Live ASR Ready');
+      }
+
       if (data.serverContent) {
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
             if (part.text) {
               this.currentUtterance += part.text;
-              this.totalWordsTranscribed += part.text.split(/\s+/).length;
+              this.totalWordsTranscribed += part.text.split(/\s+/).filter(Boolean).length;
 
               // 1. Emit live transcription preview
               if (this.onTranscriptChunk) {
@@ -203,11 +236,11 @@ class GeminiTranscribeClient {
                 });
               }
 
-              // 2. Finalize fragment if sentence ends or duration threshold reached
+              // 2. Auto-finalize condition
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
               const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
-              const isTimeThreshold = durationMs >= 2800 && trimmed.length >= 10;
+              const isTimeThreshold = durationMs >= 2600 && trimmed.length >= 10;
               const isLengthThreshold = trimmed.length >= 45;
 
               if (hasPunctuation || isTimeThreshold || isLengthThreshold) {

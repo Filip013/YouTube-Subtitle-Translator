@@ -1,6 +1,6 @@
 /**
  * Popup Script for YouTube Subtitle Translator
- * Connects UI with Two-Stage Pipeline (Transcribe Live + Flash Lite)
+ * Live Telemetry Monitor & Settings Controller
  */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const defaultSettings = {
     enabled: true,
     apiKey: '',
-    transcribeModel: 'gemini-3.5-transcribe-live',
+    transcribeModel: 'gemini-2.0-flash-exp',
     translateModel: 'gemini-3.1-flash-lite',
     scriptType: 'latin',
     speakerGender: 'auto',
@@ -66,15 +66,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateApiBadge(false);
     }
 
-    checkActiveTabMemory();
+    refreshLiveTelemetry();
   });
 
-  // Check active tab memory count
-  async function checkActiveTabMemory() {
-    if (!chrome.tabs || !chrome.tabs.query) {
-      memoryDesc.textContent = 'Storage active and ready';
-      return;
-    }
+  // Continuously refresh live telemetry while popup is open
+  async function refreshLiveTelemetry() {
+    if (!chrome.tabs || !chrome.tabs.query) return;
 
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs && tabs[0] && tabs[0].url) {
@@ -84,21 +81,47 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (cues && cues.length > 0) {
             memoryDesc.textContent = `✨ ${cues.length} subtitle fragments remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
-            liveDebugLog.textContent = `[Active] Video ID: ${activeVideoId}\nStored Cues: ${cues.length}\nLast cue: "${cues[cues.length - 1].text}"`;
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
             btnClearCurrentVideo.classList.add('hidden');
-            liveDebugLog.textContent = `[Ready] Watching video: ${activeVideoId}\n0 fragments saved yet. Play video to start transcribing!`;
           }
+
+          // Fetch real-time telemetry from content script
+          chrome.storage.local.get(['yt_live_diagnostics'], (res) => {
+            const diag = res.yt_live_diagnostics;
+            if (diag) {
+              let logText = `[Video ID] ${diag.videoId || activeVideoId}\n`;
+              logText += `[Status] ${diag.status || 'Active'}\n`;
+              logText += `[PCM Frames] ${diag.framesSent || 0} sent\n`;
+              logText += `[Saved in Storage] ${cues.length} fragments\n`;
+              if (diag.lastTranscribed) {
+                logText += `[Transcribed] "${diag.lastTranscribed.substring(0, 35)}..."\n`;
+              }
+              if (diag.lastTranslated) {
+                logText += `[Translated] "${diag.lastTranslated.substring(0, 35)}..."\n`;
+              }
+              if (diag.lastError) {
+                logText += `[⚠️ Error] ${diag.lastError}\n`;
+              }
+              liveDebugLog.textContent = logText;
+            } else {
+              liveDebugLog.textContent = `[Video ID] ${activeVideoId}\nStored Fragments: ${cues.length}\nPlay the video to stream audio.`;
+            }
+          });
           return;
         }
       }
+
       activeVideoId = null;
       memoryDesc.textContent = 'Ready on YouTube video pages';
       btnClearCurrentVideo.classList.add('hidden');
-      liveDebugLog.textContent = 'Open any YouTube video to start.';
+      liveDebugLog.textContent = 'Open any YouTube video to start monitoring.';
     });
   }
+
+  // Refresh every 800ms while popup is open
+  const pollInterval = setInterval(refreshLiveTelemetry, 800);
+  window.addEventListener('unload', () => clearInterval(pollInterval));
 
   // Clear current video subtitles
   btnClearCurrentVideo.addEventListener('click', async () => {
@@ -113,7 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
 
-      checkActiveTabMemory();
+      refreshLiveTelemetry();
     }
   });
 
@@ -134,7 +157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       btn.classList.add('active');
       currentScriptType = btn.dataset.script;
       chrome.storage.sync.set({ scriptType: currentScriptType }, () => {
-        checkActiveTabMemory();
+        refreshLiveTelemetry();
       });
     });
   });
@@ -170,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnTestConnection.textContent = '⏳ Testing...';
     hideFeedback();
 
-    const result = await GeminiService.testConnection(key, 'gemini-3.1-flash-lite');
+    const result = await GeminiService.testConnection(key, 'gemini-2.0-flash-exp');
     btnTestConnection.disabled = false;
     btnTestConnection.textContent = '⚡ Test API';
 
