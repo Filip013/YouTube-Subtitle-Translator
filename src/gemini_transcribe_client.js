@@ -1,7 +1,7 @@
 /**
  * Gemini Live Transcribe Client for YouTube Subtitle Translator (Stage 1: ASR)
  * Connects to Google's gemini-3.5-transcribe-live over WebSockets
- * with automatic reconnection, heartbeat keep-alive, and zero-loss sentence finalization.
+ * with binary/Blob support, automatic reconnection, and zero-loss sentence finalization.
  */
 
 class GeminiTranscribeClient {
@@ -23,6 +23,7 @@ class GeminiTranscribeClient {
     this.currentUtterance = '';
     this.turnStartVideoTimeMs = 0;
     this.lastAudioVideoTimeMs = 0;
+    this.totalWordsTranscribed = 0;
   }
 
   updateConfig(config = {}) {
@@ -76,8 +77,8 @@ class GeminiTranscribeClient {
         console.log('[GeminiTranscribe] Connected to Live Transcribe:', this.model);
       };
 
-      this.ws.onmessage = (event) => {
-        this._handleServerMessage(event);
+      this.ws.onmessage = async (event) => {
+        await this._handleServerMessage(event);
       };
 
       this.ws.onerror = (err) => {
@@ -90,7 +91,7 @@ class GeminiTranscribeClient {
         this.isConnected = false;
         this.isConnecting = false;
         this.isSetupComplete = false;
-        this.flush(); // Flush any pending sentence before resetting
+        this.flush();
 
         if (this.autoReconnect) {
           this._emitStatus('error', 'Reconnecting...');
@@ -133,8 +134,6 @@ class GeminiTranscribeClient {
 
   /**
    * Streams a raw 16kHz 16-bit PCM audio frame to Live Transcribe
-   * @param {string} base64PCM - Base64 encoded 16-bit little-endian PCM
-   * @param {number} videoTimeSec - Current video playback time
    */
   sendAudioFrame(base64PCM, videoTimeSec) {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isSetupComplete) {
@@ -170,11 +169,21 @@ class GeminiTranscribeClient {
   }
 
   /**
-   * Handles incoming WebSocket messages from Live Transcribe
+   * Handles incoming WebSocket messages safely handling text, Blob, or ArrayBuffer
    */
-  _handleServerMessage(event) {
+  async _handleServerMessage(event) {
     try {
-      const data = JSON.parse(event.data);
+      let rawText = '';
+      if (typeof event.data === 'string') {
+        rawText = event.data;
+      } else if (event.data instanceof Blob) {
+        rawText = await event.data.text();
+      } else if (event.data instanceof ArrayBuffer) {
+        rawText = new TextDecoder().decode(event.data);
+      }
+
+      if (!rawText) return;
+      const data = JSON.parse(rawText);
 
       if (data.serverContent) {
         const modelTurn = data.serverContent.modelTurn;
@@ -182,6 +191,7 @@ class GeminiTranscribeClient {
           for (const part of modelTurn.parts) {
             if (part.text) {
               this.currentUtterance += part.text;
+              this.totalWordsTranscribed += part.text.split(/\s+/).length;
 
               // 1. Emit live transcription preview
               if (this.onTranscriptChunk) {
@@ -197,8 +207,8 @@ class GeminiTranscribeClient {
               const trimmed = this.currentUtterance.trim();
               const durationMs = this.lastAudioVideoTimeMs - this.turnStartVideoTimeMs;
               const hasPunctuation = /[.!?\n]$/.test(trimmed) && trimmed.length >= 6;
-              const isTimeThreshold = durationMs >= 3000 && trimmed.length >= 10;
-              const isLengthThreshold = trimmed.length >= 50;
+              const isTimeThreshold = durationMs >= 2800 && trimmed.length >= 10;
+              const isLengthThreshold = trimmed.length >= 45;
 
               if (hasPunctuation || isTimeThreshold || isLengthThreshold) {
                 this._finalizeCurrentUtterance();

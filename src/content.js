@@ -204,6 +204,8 @@
       if (storedCues && storedCues.length > 0) {
         console.log(`[GeminiSubtitles] Loaded ${storedCues.length} remembered subtitles for video: ${videoId}`);
         storedCues.forEach(cue => subtitleRenderer.addCue(cue));
+      } else {
+        console.log(`[GeminiSubtitles] No existing saved subtitles for video: ${videoId}`);
       }
     } catch (err) {
       console.warn('[GeminiSubtitles] Failed to load stored subtitles:', err);
@@ -260,7 +262,9 @@
     const videoElement = document.querySelector('video.html5-main-video') || document.querySelector('video');
 
     if (playerContainer && videoElement) {
-      if (currentVideoId !== videoId) {
+      const isNewVideo = currentVideoId !== videoId;
+
+      if (isNewVideo) {
         currentVideoId = videoId;
         if (subtitleRenderer) subtitleRenderer.clear();
         if (vadProcessor) vadProcessor.reset();
@@ -268,12 +272,16 @@
           transcribeClient.resetStream();
           transcribeClient.connect();
         }
-
-        await loadStoredSubtitles(videoId);
       }
 
+      // Initialize subtitle renderer and audio capture
       subtitleRenderer.init(playerContainer, videoElement);
       audioCapture.attach(videoElement);
+
+      if (isNewVideo) {
+        // Load stored subtitles after renderer DOM is initialized
+        await loadStoredSubtitles(videoId);
+      }
     } else {
       setTimeout(checkAndAttachPlayer, 500);
     }

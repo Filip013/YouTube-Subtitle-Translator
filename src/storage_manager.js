@@ -42,7 +42,7 @@ class StorageManager {
    * Loads all saved subtitle cues for a specific video and script
    * @param {string} videoId 
    * @param {string} scriptType 
-   * @returns {Promise<Array<{id: string, text: string, startMs: number, endMs: number}>>}
+   * @returns {Promise<Array<{id: string, text: string, originalText?: string, startMs: number, endMs: number}>>}
    */
   async loadSubtitles(videoId, scriptType = 'latin') {
     const cleanId = String(videoId || '').trim();
@@ -52,16 +52,19 @@ class StorageManager {
 
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        resolve(this.inMemoryCache.get(key) || []);
+        const cached = this.inMemoryCache.get(key) || [];
+        resolve(cached);
         return;
       }
 
       chrome.storage.local.get([key], (result) => {
         if (result && result[key] && Array.isArray(result[key].cues)) {
           this.inMemoryCache.set(key, result[key].cues);
+          console.log(`[StorageManager] Successfully loaded ${result[key].cues.length} cues for [${key}]`);
           resolve(result[key].cues);
         } else {
-          resolve([]);
+          const cached = this.inMemoryCache.get(key) || [];
+          resolve(cached);
         }
       });
     });
@@ -71,7 +74,7 @@ class StorageManager {
    * Saves or merges a subtitle cue immediately into chrome.storage.local
    * @param {string} videoId 
    * @param {string} scriptType 
-   * @param {Object} cue - { startMs: number, endMs: number, text: string }
+   * @param {Object} cue - { startMs: number, endMs: number, text: string, originalText?: string }
    * @param {string} [videoTitle] - Title of the YouTube video
    * @returns {Promise<void>}
    */
@@ -83,15 +86,20 @@ class StorageManager {
     const cueItem = {
       id: `${cue.startMs}_${cue.endMs}`,
       text: cue.text.trim(),
+      originalText: cue.originalText ? cue.originalText.trim() : '',
       startMs: cue.startMs,
       endMs: cue.endMs
     };
 
+    // Update in-memory cache immediately
+    const existingCached = this.inMemoryCache.get(key) || [];
+    const filteredCached = existingCached.filter(c => c.id !== cueItem.id);
+    filteredCached.push(cueItem);
+    filteredCached.sort((a, b) => a.startMs - b.startMs);
+    this.inMemoryCache.set(key, filteredCached);
+
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        const existing = this.inMemoryCache.get(key) || [];
-        existing.push(cueItem);
-        this.inMemoryCache.set(key, existing);
         resolve();
         return;
       }
@@ -110,7 +118,6 @@ class StorageManager {
           existingRecord.videoTitle = videoTitle;
         }
 
-        // Merge cue by ID / range to prevent duplicates
         const cueMap = new Map();
         for (const c of existingRecord.cues) {
           cueMap.set(`${c.startMs}_${c.endMs}`, c);
@@ -121,7 +128,7 @@ class StorageManager {
         existingRecord.cues = mergedCues;
         existingRecord.updatedAt = Date.now();
 
-        // Update global saved video index
+        // Update global index
         let index = result.yt_saved_video_index || {};
         index[cleanId] = {
           videoId: cleanId,
@@ -135,6 +142,10 @@ class StorageManager {
           yt_saved_video_index: index
         }, () => {
           this.inMemoryCache.set(key, mergedCues);
+          console.log(`[StorageManager] Persisted cue: "${cueItem.text}" (Total stored: ${mergedCues.length})`);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('gemini_subtitles_updated', { detail: { count: mergedCues.length } }));
+          }
           resolve();
         });
       });

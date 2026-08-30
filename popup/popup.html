@@ -67,17 +67,6 @@
         </div>
       </div>
 
-      <!-- Live Stream Status Card -->
-      <div class="memory-card">
-        <div class="memory-info">
-          <span class="memory-icon">🟢</span>
-          <div>
-            <div class="memory-title">Two-Stage Live Pipeline</div>
-            <div id="live-stream-status" class="memory-desc">gemini-3.5-transcribe-live + Flash Lite</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Video Memory Status with Quick Clear Action -->
       <div id="video-memory-card" class="memory-card">
         <div class="memory-info flex-between">
@@ -94,6 +83,14 @@
         </div>
       </div>
 
+      <!-- Live Diagnostics Box -->
+      <div class="section-group">
+        <label class="section-label">Live Monitor</label>
+        <div id="live-debug-log" class="debug-log-box">
+          Live stream connected. Watching for audio...
+        </div>
+      </div>
+
       <!-- API Key Status / Quick Input -->
       <div class="section-group">
         <div class="flex-between">
@@ -104,7 +101,6 @@
           <input type="password" id="api-key-input" class="form-input" placeholder="AIzaSy..." autocomplete="off">
           <button type="button" id="btn-save-key" class="btn-primary" title="Save API Key">Save</button>
         </div>
-        <p id="key-helper" class="helper-text">Saved securely in your local browser.</p>
       </div>
 
       <div id="test-result-box" class="test-result-box hidden"></div>
@@ -113,7 +109,7 @@
     <!-- Footer -->
     <footer class="footer">
       <button type="button" id="btn-test-connection" class="btn-secondary">
-        <span>⚡ Test API Key</span>
+        <span>⚡ Test API</span>
       </button>
       <button type="button" id="btn-open-options" class="btn-icon" title="Full Options & Video Manager">
         ⚙️ Settings

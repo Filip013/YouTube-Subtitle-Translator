@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const testResultBox = document.getElementById('test-result-box');
   const memoryDesc = document.getElementById('memory-subtitle-count');
   const btnClearCurrentVideo = document.getElementById('btn-clear-current-video');
+  const liveDebugLog = document.getElementById('live-debug-log');
 
   const storageManager = new StorageManager();
   let currentScriptType = 'latin';
@@ -83,9 +84,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (cues && cues.length > 0) {
             memoryDesc.textContent = `✨ ${cues.length} subtitle fragments remembered`;
             btnClearCurrentVideo.classList.remove('hidden');
+            liveDebugLog.textContent = `[Active] Video ID: ${activeVideoId}\nStored Cues: ${cues.length}\nLast cue: "${cues[cues.length - 1].text}"`;
           } else {
             memoryDesc.textContent = 'No previous subtitles for this video yet';
             btnClearCurrentVideo.classList.add('hidden');
+            liveDebugLog.textContent = `[Ready] Watching video: ${activeVideoId}\n0 fragments saved yet. Play video to start transcribing!`;
           }
           return;
         }
@@ -93,6 +96,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       activeVideoId = null;
       memoryDesc.textContent = 'Ready on YouTube video pages';
       btnClearCurrentVideo.classList.add('hidden');
+      liveDebugLog.textContent = 'Open any YouTube video to start.';
     });
   }
 
@@ -168,7 +172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const result = await GeminiService.testConnection(key, 'gemini-3.1-flash-lite');
     btnTestConnection.disabled = false;
-    btnTestConnection.textContent = '⚡ Test API Key';
+    btnTestConnection.textContent = '⚡ Test API';
 
     if (result.success) {
       updateApiBadge(true);
