@@ -100,7 +100,17 @@
       onPCMFrame: (pcmFrame) => {
         if (!config.enabled || !config.apiKey || !geminiLiveClient) return;
 
-        // Continuous streaming to Live WebSocket API without local blocking
+        const currentTimeMs = Math.round(pcmFrame.videoTimeSec * 1000);
+
+        // Check if this time range was ALREADY subtitled and saved in memory:
+        if (subtitleRenderer && subtitleRenderer.hasCueAtTime(currentTimeMs)) {
+          // If we are passing through an already subtitled segment, flush any pending live buffer
+          geminiLiveClient.flush();
+          // Skip sending audio to avoid duplicate API calls & re-translation
+          return;
+        }
+
+        // Stream audio for un-subtitled territory
         geminiLiveClient.sendAudioFrame(pcmFrame.base64PCM, pcmFrame.videoTimeSec);
       }
     });
@@ -188,10 +198,10 @@
     if (!config.enabled || !currentVideoId) return;
 
     if (!subtitleData.isFinal) {
-      // Real-time live preview update
+      // Live streaming real-time preview on screen
       subtitleRenderer.setLiveCue(subtitleData.text, subtitleData.startMs, subtitleData.endMs);
     } else {
-      // Finalized sentence cue
+      // Finalized sentence cue: commit and save
       const cue = {
         text: subtitleData.text,
         startMs: subtitleData.startMs,
@@ -203,6 +213,7 @@
       if (storageManager) {
         const title = getVideoTitle();
         storageManager.saveCue(currentVideoId, config.scriptType, cue, title);
+        console.log(`[GeminiSubtitles] Persisted fragment [${cue.startMs}ms - ${cue.endMs}ms]: ${cue.text}`);
       }
     }
   }
