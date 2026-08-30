@@ -1,14 +1,14 @@
 /**
  * Gemini Live Client for YouTube Subtitle Translator (End-to-End Live Translation)
  * Connects to Google's Multimodal Live API over WebSockets (gemini-3.5-live-translate-preview)
- * Streams 16kHz PCM audio and outputs real-time translated Serbian subtitles with zero REST API calls.
+ * with official translationConfig (targetLanguageCode: 'sr-Latn' / 'sr-Cyrl').
  */
 
 class GeminiLiveClient {
   constructor(config = {}) {
     this.apiKey = config.apiKey || '';
     this.model = config.model || 'gemini-3.5-live-translate-preview';
-    this.scriptType = config.scriptType || 'latin'; // 'latin' or 'cyrillic'
+    this.scriptType = config.scriptType || 'latin'; // 'latin' (sr-Latn) or 'cyrillic' (sr-Cyrl)
     this.speakerGender = config.speakerGender || 'auto'; // 'auto', 'male', 'female'
 
     this.ws = null;
@@ -101,7 +101,7 @@ class GeminiLiveClient {
     this.isConnecting = true;
     this.isSetupComplete = false;
     this.lastError = null;
-    this._emitStatus('connecting', 'Connecting to Flash Live WebSocket...');
+    this._emitStatus('connecting', 'Connecting to Live Translate WebSocket...');
 
     const cleanModel = this.model.replace(/^models\//, '');
     const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.apiKey}`;
@@ -115,7 +115,7 @@ class GeminiLiveClient {
         this.lastError = null;
         this._sendSetupHandshake(cleanModel);
         this._emitStatus('connected', `Live Translate (${cleanModel})`);
-        console.log('[GeminiLive] Connected to Gemini Multimodal Live API:', cleanModel);
+        console.log('[GeminiLive] Connected to Live Translate WebSocket:', cleanModel);
       };
 
       this.ws.onmessage = async (event) => {
@@ -123,7 +123,7 @@ class GeminiLiveClient {
       };
 
       this.ws.onerror = (err) => {
-        this.lastError = 'Live WebSocket connection error.';
+        this.lastError = 'Live WebSocket error.';
         console.warn('[GeminiLive] WebSocket error:', err);
         this._emitStatus('error', this.lastError);
       };
@@ -164,48 +164,26 @@ class GeminiLiveClient {
   _sendSetupHandshake(cleanModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const scriptInstruction = this.scriptType === 'cyrillic'
-      ? 'Target script: Serbian Cyrillic (Srpska Ćirilica: а, б, в, г, д, ђ, е, ж, з, и, ј, к, л, љ, м, н, њ, о, п, р, с, т, ћ, у, ф, х, ц, ч, џ, ш).'
-      : 'Target script: Serbian Latin (Srpska Latinica: a, b, c, č, ć, d, dž, đ, e, f, g, h, i, j, k, l, lj, m, n, nj, o, p, r, s, š, t, u, v, z, ž).';
-
-    let genderInstruction = '';
-    if (this.speakerGender === 'female') {
-      genderInstruction = 'The speaker is FEMALE. Use feminine past tense verb forms and adjectives (e.g. bila sam, rekla sam, videla sam, srećna).';
-    } else if (this.speakerGender === 'male') {
-      genderInstruction = 'The speaker is MALE. Use masculine past tense verb forms and adjectives (e.g. bio sam, rekao sam, video sam, srećan).';
-    } else {
-      genderInstruction = 'Default to standard natural Serbian phrasing with appropriate context agreement.';
-    }
-
-    const systemPrompt = `You are a live real-time speech-to-subtitles translator.
-Listen to the incoming English audio stream and translate spoken sentences directly and accurately into natural Serbian subtitles.
-${scriptInstruction}
-${genderInstruction}
-Strict Rules:
-1. Output ONLY the translated Serbian subtitle text in real-time.
-2. DO NOT output conversational filler, assistant replies, notes, metadata, or timestamps.
-3. Keep the translation concise, natural, and synchronized with video subtitles.
-4. If there is only background music or unintelligible noise, do not output anything.`;
+    // Use BCP-47 language tag for Serbian: sr-Latn (Latin) or sr-Cyrl (Cyrillic)
+    const targetLangCode = this.scriptType === 'cyrillic' ? 'sr-Cyrl' : 'sr-Latn';
 
     const setupPayload = {
       setup: {
         model: `models/${cleanModel}`,
         generationConfig: {
-          responseModalities: ['TEXT'],
-          temperature: 0.1
+          responseModalities: ['TEXT']
         },
-        systemInstruction: {
-          parts: [
-            { text: systemPrompt }
-          ]
+        translationConfig: {
+          targetLanguageCode: targetLangCode,
+          echoTargetLanguage: false
         }
       }
     };
 
     this.ws.send(JSON.stringify(setupPayload));
     this.isSetupComplete = true;
-    this.lastServerMessage = `Setup sent (model: models/${cleanModel})`;
-    console.log('[GeminiLive] Setup handshake sent for models/' + cleanModel);
+    this.lastServerMessage = `Setup sent (model: models/${cleanModel}, target: ${targetLangCode})`;
+    console.log('[GeminiLive] Setup handshake sent with translationConfig for ' + targetLangCode);
   }
 
   sendAudioFrame(base64PCM, videoTimeSec) {
@@ -259,12 +237,12 @@ Strict Rules:
       const data = JSON.parse(rawText);
 
       if (data.setupComplete) {
-        this.lastServerMessage = 'setupComplete received from Google!';
+        this.lastServerMessage = 'setupComplete received (Live Translate Ready)';
         this._emitStatus('connected', 'Live Translate Ready');
       }
 
       if (data.serverContent) {
-        // Handle interim translated stream
+        // 1. Handle live interim translation streaming
         if (data.serverContent.interimInputTranscription) {
           const interimText = data.serverContent.interimInputTranscription.text;
           if (interimText) {
@@ -281,7 +259,7 @@ Strict Rules:
           }
         }
 
-        // Handle finalized translation
+        // 2. Handle finalized translation from translationConfig pipeline
         if (data.serverContent.inputTranscription) {
           const finalText = data.serverContent.inputTranscription.text;
           if (finalText && finalText.trim()) {
@@ -306,7 +284,7 @@ Strict Rules:
           }
         }
 
-        // Handle model turn parts
+        // 3. Handle model turn parts
         const modelTurn = data.serverContent.modelTurn;
         if (modelTurn && Array.isArray(modelTurn.parts)) {
           for (const part of modelTurn.parts) {
