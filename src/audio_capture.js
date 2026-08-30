@@ -126,8 +126,8 @@ class AudioCaptureEngine {
         return;
       }
 
-      // Process audio in 4096-sample buffer frames (~85ms at 48kHz)
-      const bufferSize = 4096;
+      // Process audio in 2048-sample buffer frames (~42ms at 48kHz for low latency)
+      const bufferSize = 2048;
       this.processorNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
 
       this.processorNode.onaudioprocess = (event) => {

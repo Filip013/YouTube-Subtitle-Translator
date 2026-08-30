@@ -264,11 +264,11 @@ class GeminiLiveClient {
             });
           }
 
-          // Finalize strictly on sentence-ending punctuation (. ? !)
+          // Fast clause boundaries: ., ?, !, ,, ;, :, or newlines
           const trimmed = this.currentUtterance.trim();
-          const hasPunctuation = /[.!?]$/.test(trimmed) && trimmed.length >= 8;
+          const hasClauseBreak = /[.!?,;:\n]$/.test(trimmed) && trimmed.length >= 6;
 
-          if (hasPunctuation) {
+          if (hasClauseBreak) {
             this._finalizeCurrentUtterance();
           }
         }
